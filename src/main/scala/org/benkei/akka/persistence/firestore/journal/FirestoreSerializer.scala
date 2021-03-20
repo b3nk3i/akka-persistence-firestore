@@ -1,9 +1,9 @@
-package org.benkei.akka.persistence.firestore
+package org.benkei.akka.persistence.firestore.journal
 
 import akka.actor.Actor
 import akka.persistence.PersistentRepr
 import akka.persistence.journal.Tagged
-import akka.serialization.SerializerWithStringManifest
+import akka.serialization.{Serialization, Serializer, SerializerWithStringManifest, Serializers}
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -20,7 +20,7 @@ object FirestoreSerializer {
   /*
     Default implementation based on Akka SerializerWithStringManifest.
    */
-  def apply(eventSerializer: SerializerWithStringManifest): FirestoreSerializer =
+  def apply(serialization: Serialization): FirestoreSerializer =
     new FirestoreSerializer {
 
       def deserialize(fpr: FirestorePersistentRepr): Try[PersistentRepr] =
@@ -32,7 +32,9 @@ object FirestoreSerializer {
           val manifest      = data("manifest").asInstanceOf[String]
           val deleted       = data("deleted").asInstanceOf[Boolean]
           val writerUUID    = data("writer-uuid").asInstanceOf[String]
-          val event         = eventSerializer.fromBinary(payload.getBytes, manifest)
+          val serializerId  = data("serializer-id").asInstanceOf[Int]
+
+          val event = serialization.deserialize(payload.getBytes, serializerId, manifest)
 
           PersistentRepr(event, sequence, persistenceId, manifest, deleted, Actor.noSender, writerUUID)
         }
@@ -45,8 +47,9 @@ object FirestoreSerializer {
           }
 
           val p2          = updatedPr.payload.asInstanceOf[AnyRef]
-          val serManifest = eventSerializer.manifest(p2)
-          val serPayload  = eventSerializer.toBinary(p2)
+          val serializer  = serialization.findSerializerFor(p2)
+          val serManifest = Serializers.manifestFor(serializer, p2)
+          val serPayload  = serialization.serialize(p2)
 
           val data: Map[String, Any] =
             Map(
@@ -57,7 +60,7 @@ object FirestoreSerializer {
               "timestamp"      -> updatedPr.timestamp,
               "manifest"       -> serManifest,
               "payload"        -> serPayload,
-              "serializer-id"  -> eventSerializer.identifier
+              "serializer-id"  -> serializer.identifier
 
               /*
               "meta-payload" -> serializedMetadata.map(_.payload),
