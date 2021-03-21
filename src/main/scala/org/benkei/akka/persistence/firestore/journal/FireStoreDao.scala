@@ -5,6 +5,7 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import cats.implicits.toFunctorOps
 import com.google.cloud.firestore.{DocumentSnapshot, Firestore}
+import org.benkei.akka.persistence.firestore.data.Document.Document
 import org.benkei.akka.persistence.firestore.data.Field
 import org.benkei.akka.persistence.firestore.journal.FireStoreDao.asFirestoreRepr
 import org.benkei.google.ApiFuturesOps.ApiFutureExt
@@ -20,12 +21,33 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   mat: Materializer
 ) {
 
-  def write(evt: FirestorePersistentRepr): Future[Unit] = {
-    db.collection(rootCollection)
-      .document(evt.persistenceId)
-      .collection("event-journal")
-      .document(evt.sequence.toString)
-      .create(evt.data.asJava)
+  def write(events: Seq[FirestorePersistentRepr]): Future[Unit] = {
+
+    val journalSequence = db.collection(rootCollection).document("sequences")
+
+    db.runTransaction { transaction =>
+        val currentOrdering =
+          transaction.get(journalSequence).get().getLong(Field.Ordering.name)
+
+        val lastOrdering =
+          events.foldLeft(currentOrdering) {
+            case (acc, event) =>
+              val next = acc + 1
+
+              val ordering: Document = Map(Field.Ordering.name -> next)
+
+              transaction.create(
+                db.collection(rootCollection)
+                  .document(event.persistenceId)
+                  .collection("event-journal")
+                  .document(event.sequence.toString),
+                (event.data ++ ordering).asJava
+              )
+              next
+          }
+
+        transaction.update(journalSequence, Field.Ordering.name, lastOrdering)
+      }
       .futureLift
       .void
   }

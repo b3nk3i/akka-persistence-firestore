@@ -3,6 +3,7 @@ package org.benkei.akka.persistence.firestore.journal
 import akka.persistence.journal.AsyncWriteJournal
 import akka.persistence.{AtomicWrite, PersistentRepr}
 import akka.serialization.SerializationExtension
+import akka.stream.scaladsl.Source
 import akka.stream.{Materializer, SystemMaterializer}
 import cats.implicits._
 import com.google.cloud.firestore.Firestore
@@ -43,8 +44,11 @@ class FirestoreJournalPlugin(config: Config) extends AsyncWriteJournal {
   }
 
   override def asyncWriteMessages(messages: Seq[AtomicWrite]): Future[Seq[Try[Unit]]] = {
-    messages
-      .traverse(atomicWrite => serialize(atomicWrite).traverse(pr => pr.traverse(dao.write).map(_ => ())))
+    Source
+      .fromIterator(() => messages.iterator)
+      .map { atomicWrite => serialize(atomicWrite) }
+      .mapAsync(1) { maybeEvents => maybeEvents.traverse(dao.write) }
+      .runFold(Seq.empty[Try[Unit]]) { _ :+ _ }
   }
 
   override def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long): Future[Unit] = {
