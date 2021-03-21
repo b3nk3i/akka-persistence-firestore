@@ -8,3 +8,6 @@ scalaVersion := "2.13.5"
 
 lazy val root = (project in file("."))
   .settings(scalafmtOnCompile := true, autoAPIMappings := true, libraryDependencies ++= Libraries.All)
+  .settings(inConfig(Config.IT)(Defaults.testSettings))
+  .configs(Config.IT)
+

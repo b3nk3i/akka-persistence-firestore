@@ -11,7 +11,7 @@ trait FireStoreProvider {
 
 class DefaultFireStoreProvider(system: ActorSystem) extends FireStoreProvider {
   override def client(config: Config): Firestore = {
-    val projectId = config.getString("projectId")
+    val projectId = config.getString("project-id")
 
     val options = FirestoreOptions
       .newBuilder()
