@@ -7,6 +7,7 @@ import akka.serialization.{Serialization, Serializers}
 import org.benkei.akka.persistence.firestore.data.Document._
 import org.benkei.akka.persistence.firestore.data.Field
 
+import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 trait FirestoreSerializer {
@@ -52,6 +53,9 @@ object FirestoreSerializer {
           serManifest <- Try(Serializers.manifestFor(serializer, p2))
           serPayload  <- serialization.serialize(p2)
         } yield {
+
+          val serTags: List[String] = tags.toList
+
           val data: Document =
             updatedPr.deleted.write(Field.Deleted) ++
               updatedPr.persistenceId.write(Field.PersistenceID) ++
@@ -61,7 +65,7 @@ object FirestoreSerializer {
               serManifest.write(Field.Manifest) ++
               new String(serPayload).write(Field.Payload) ++
               serializer.identifier.toLong.write(Field.SerializerID) ++
-              tags.toList.write(Field.Tags)
+              serTags.asJava.write(Field.Tags)
 
           FirestorePersistentRepr(updatedPr.persistenceId, updatedPr.sequenceNr, data)
         }

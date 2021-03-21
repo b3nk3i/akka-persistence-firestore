@@ -48,15 +48,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
     toSequenceNr:   Long,
     max:            Long
   ): Source[FirestorePersistentRepr, NotUsed] = {
-    db.collection(rootCollection)
-      .document(persistenceId)
-      .collection("event-journal")
-      .whereGreaterThanOrEqualTo(Field.Sequence.name, fromSequenceNr)
-      .whereLessThanOrEqualTo(Field.Sequence.name, toSequenceNr)
-      .orderBy(Field.Sequence.name)
-      .toStream(queueSize, enqueueTimeout)
-      .take(max)
-      .mapAsync(parallelism)(event => asFirestoreRepr(persistenceId, event))
+    events(persistenceId, fromSequenceNr, toSequenceNr).take(max)
   }
 
   def readMaxSequenceNr(persistenceId: String, fromSequenceNr: Long): Future[Long] = {
@@ -68,6 +60,28 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
       .toStream(queueSize, enqueueTimeout)
       .map(_.getId.toLong)
       .runFold(fromSequenceNr)(math.max)
+  }
+
+  def persistenceIds(): Source[String, NotUsed] = {
+    db.collection(rootCollection)
+      .select(Field.PersistenceID.name)
+      .toStream(queueSize, enqueueTimeout)
+      .map(_.getId)
+  }
+
+  def events(
+    persistenceId:  String,
+    fromSequenceNr: Long,
+    toSequenceNr:   Long
+  ): Source[FirestorePersistentRepr, NotUsed] = {
+    db.collection(rootCollection)
+      .document(persistenceId)
+      .collection("event-journal")
+      .whereGreaterThanOrEqualTo(Field.Sequence.name, fromSequenceNr)
+      .whereLessThanOrEqualTo(Field.Sequence.name, toSequenceNr)
+      .orderBy(Field.Sequence.name)
+      .toStream(queueSize, enqueueTimeout)
+      .mapAsync(parallelism)(event => asFirestoreRepr(persistenceId, event))
   }
 }
 

@@ -14,6 +14,6 @@ object Field {
   case object WriterUUID    extends Field[String] { val name = "writer-uuid" }
   case object SerializerID  extends Field[Long] { val name = "serializer-id" }
   case object Timestamp     extends Field[Long] { val name = "timestamp" }
-  case object Tags          extends Field[List[String]] { val name = "tags" }
+  case object Tags          extends Field[java.util.List[String]] { val name = "tags" }
 
 }
