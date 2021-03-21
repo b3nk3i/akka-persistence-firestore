@@ -4,8 +4,9 @@ import akka.actor.Actor
 import akka.persistence.PersistentRepr
 import akka.persistence.journal.Tagged
 import akka.serialization.{Serialization, Serializers}
+import org.benkei.akka.persistence.firestore.data.Document._
+import org.benkei.akka.persistence.firestore.data.Field
 
-import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 trait FirestoreSerializer {
@@ -24,15 +25,15 @@ object FirestoreSerializer {
     new FirestoreSerializer {
 
       def deserialize(fpr: FirestorePersistentRepr): Try[PersistentRepr] = {
-        val data = fpr.data
+        val data: Document = fpr.data
         for {
-          payload       <- Try(data("payload").asInstanceOf[String])
-          sequence      <- Try(data("sequence").asInstanceOf[Long])
-          persistenceId <- Try(data("persistence-id").asInstanceOf[String])
-          manifest      <- Try(data("manifest").asInstanceOf[String])
-          deleted       <- Try(data("deleted").asInstanceOf[Boolean])
-          writerUUID    <- Try(data("writer-uuid").asInstanceOf[String])
-          serializerId  <- Try(data("serializer-id").asInstanceOf[Long])
+          payload       <- data.read(Field.Payload)
+          sequence      <- data.read(Field.Sequence)
+          persistenceId <- data.read(Field.PersistenceID)
+          manifest      <- data.read(Field.Manifest)
+          deleted       <- data.read(Field.Deleted)
+          writerUUID    <- data.read(Field.WriterUUID)
+          serializerId  <- data.read(Field.SerializerID)
           event         <- serialization.deserialize(payload.getBytes, serializerId.toInt, manifest)
         } yield {
           PersistentRepr(event, sequence, persistenceId, manifest, deleted, Actor.noSender, writerUUID)
@@ -41,8 +42,8 @@ object FirestoreSerializer {
 
       def serialize(pr: PersistentRepr): Try[FirestorePersistentRepr] = {
         val (updatedPr, tags) = pr.payload match {
-          case Tagged(payload, tags) => (pr.withPayload(payload), Map("tags" -> tags.toList.asJava))
-          case _                     => (pr, Map.empty[String, Any])
+          case Tagged(payload, tags) => (pr.withPayload(payload), tags)
+          case _                     => (pr, Set.empty)
         }
 
         for {
@@ -51,23 +52,16 @@ object FirestoreSerializer {
           serManifest <- Try(Serializers.manifestFor(serializer, p2))
           serPayload  <- serialization.serialize(p2)
         } yield {
-          val data: Map[String, Any] =
-            Map(
-              "deleted"        -> updatedPr.deleted,
-              "persistence-id" -> updatedPr.persistenceId,
-              "sequence"       -> updatedPr.sequenceNr,
-              "writer-uuid"    -> updatedPr.writerUuid,
-              "timestamp"      -> updatedPr.timestamp,
-              "manifest"       -> serManifest,
-              "payload"        -> new String(serPayload),
-              "serializer-id"  -> serializer.identifier.toLong
-
-              /*
-                "meta-payload" -> serializedMetadata.map(_.payload),
-                "meta-serializer-id" -> serializedMetadata.map(_.serId),
-                "meta-manifest" -> serializedMetadata.map(_.serManifest)
-               */
-            ) ++ tags
+          val data: Document =
+            updatedPr.deleted.write(Field.Deleted) ++
+              updatedPr.persistenceId.write(Field.PersistenceID) ++
+              updatedPr.sequenceNr.write(Field.Sequence) ++
+              updatedPr.writerUuid.write(Field.WriterUUID) ++
+              updatedPr.timestamp.write(Field.Timestamp) ++
+              serManifest.write(Field.Manifest) ++
+              new String(serPayload).write(Field.Payload) ++
+              serializer.identifier.toLong.write(Field.SerializerID) ++
+              tags.toList.write(Field.Tags)
 
           FirestorePersistentRepr(updatedPr.persistenceId, updatedPr.sequenceNr, data)
         }

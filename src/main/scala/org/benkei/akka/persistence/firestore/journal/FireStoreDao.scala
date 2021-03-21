@@ -5,6 +5,7 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import cats.implicits.toFunctorOps
 import com.google.cloud.firestore.{DocumentSnapshot, Firestore}
+import org.benkei.akka.persistence.firestore.data.Field
 import org.benkei.akka.persistence.firestore.journal.FireStoreDao.asFirestoreRepr
 import org.benkei.google.ApiFuturesOps.ApiFutureExt
 import org.benkei.google.FirestoreStreamingOps.StreamQueryOps
@@ -12,7 +13,6 @@ import org.benkei.google.FirestoreStreamingOps.StreamQueryOps
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
-import scala.math
 
 class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueueTimeout: Duration, parallelism: Int)(
   implicit
@@ -34,8 +34,8 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
     db.collection(rootCollection)
       .document(persistenceId)
       .collection("event-journal")
-      .whereLessThanOrEqualTo("sequence", toSequenceNr)
-      .orderBy("sequence")
+      .whereLessThanOrEqualTo(Field.Sequence.name, toSequenceNr)
+      .orderBy(Field.Sequence.name)
       .toStream(queueSize, enqueueTimeout)
       .mapAsyncUnordered(parallelism)(event => event.getReference.update("deleted", true).futureLift)
       .run()
@@ -51,9 +51,9 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
     db.collection(rootCollection)
       .document(persistenceId)
       .collection("event-journal")
-      .whereGreaterThanOrEqualTo("sequence", fromSequenceNr)
-      .whereLessThanOrEqualTo("sequence", toSequenceNr)
-      .orderBy("sequence")
+      .whereGreaterThanOrEqualTo(Field.Sequence.name, fromSequenceNr)
+      .whereLessThanOrEqualTo(Field.Sequence.name, toSequenceNr)
+      .orderBy(Field.Sequence.name)
       .toStream(queueSize, enqueueTimeout)
       .take(max)
       .mapAsync(parallelism)(event => asFirestoreRepr(persistenceId, event))
@@ -63,8 +63,8 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
     db.collection(rootCollection)
       .document(persistenceId)
       .collection("event-journal")
-      .whereGreaterThanOrEqualTo("sequence", fromSequenceNr)
-      .orderBy("sequence")
+      .whereGreaterThanOrEqualTo(Field.Sequence.name, fromSequenceNr)
+      .orderBy(Field.Sequence.name)
       .toStream(queueSize, enqueueTimeout)
       .map(_.getId.toLong)
       .runFold(fromSequenceNr)(math.max)

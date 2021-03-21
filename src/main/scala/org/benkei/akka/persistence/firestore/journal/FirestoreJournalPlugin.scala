@@ -3,14 +3,13 @@ package org.benkei.akka.persistence.firestore.journal
 import akka.persistence.journal.AsyncWriteJournal
 import akka.persistence.{AtomicWrite, PersistentRepr}
 import akka.serialization.SerializationExtension
-import akka.stream.Materializer
+import akka.stream.{Materializer, SystemMaterializer}
 import cats.implicits._
 import com.google.cloud.firestore.Firestore
 import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.client.FireStoreExtension
+import org.benkei.akka.persistence.firestore.config.FirestoreJournalConfig
 
-import java.util.concurrent.TimeUnit
-import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.Try
 
@@ -21,32 +20,23 @@ class FirestoreJournalPlugin(config: Config) extends AsyncWriteJournal {
 
   implicit val ec: ExecutionContextExecutor = context.system.dispatcher
 
-  implicit val mat: Materializer = Materializer(context.system)
+  implicit val mat: Materializer = SystemMaterializer(context.system).materializer
 
   val db: Firestore = FireStoreExtension(context.system).client(config)
-
-  val rootCollection: String = {
-    config.getString("root")
-  }
-
-  val enqueueTimeout: FiniteDuration = {
-    val t = config.getDuration("enqueue-timeout")
-    FiniteDuration(t.toMillis, TimeUnit.MILLISECONDS)
-  }
-
-  val queueSize: Int = {
-    config.getInt("queue-size")
-  }
-
-  val parallelism: Int = {
-    config.getInt("parallelism")
-  }
 
   val serializer: FirestoreSerializer = {
     FirestoreSerializer(SerializationExtension(context.system))
   }
 
-  val dao = new FireStoreDao(db, rootCollection, queueSize, enqueueTimeout, parallelism)
+  val journalConfig: FirestoreJournalConfig = FirestoreJournalConfig(config)
+
+  val dao = new FireStoreDao(
+    db,
+    journalConfig.rootCollection,
+    journalConfig.queueSize,
+    journalConfig.enqueueTimeout,
+    journalConfig.parallelism
+  )
 
   def serialize(aw: AtomicWrite): Try[Seq[FirestorePersistentRepr]] = {
     aw.payload.traverse(serializer.serialize)
