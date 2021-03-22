@@ -15,6 +15,10 @@ trait FirestoreSerializer {
   def serialize(pr: PersistentRepr): Try[FirestorePersistentRepr]
 
   def deserialize(fpr: FirestorePersistentRepr): Try[PersistentRepr]
+
+  def ordering(fpr: FirestorePersistentRepr): Try[Long]
+
+  def timestamp(fpr: FirestorePersistentRepr): Try[Long]
 }
 
 object FirestoreSerializer {
@@ -70,6 +74,14 @@ object FirestoreSerializer {
           FirestorePersistentRepr(updatedPr.persistenceId, updatedPr.sequenceNr, data)
         }
 
+      }
+
+      override def ordering(fpr: FirestorePersistentRepr): Try[Long] = {
+        fpr.data.read(Field.Ordering)
+      }
+
+      override def timestamp(fpr: FirestorePersistentRepr): Try[Long] = {
+        fpr.data.read(Field.Timestamp)
       }
     }
 }

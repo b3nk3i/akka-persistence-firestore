@@ -21,9 +21,11 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   mat: Materializer
 ) {
 
+  val Sequences = "sequences"
+
   def write(events: Seq[FirestorePersistentRepr]): Future[Unit] = {
 
-    val journalSequence = db.collection(rootCollection).document("sequences")
+    val journalSequence = db.collection(rootCollection).document(Sequences)
 
     db.runTransaction { transaction =>
         val currentOrdering =
@@ -85,10 +87,10 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   }
 
   def persistenceIds(): Source[String, NotUsed] = {
-    db.collection(rootCollection)
-      .select(Field.PersistenceID.name)
-      .toStream(queueSize, enqueueTimeout)
-      .map(_.getId)
+    Source
+      .fromIterator(() => db.collection(rootCollection).listDocuments().iterator().asScala)
+      .map(ref => ref.getId)
+      .filterNot(_ == Sequences)
   }
 
   def events(
@@ -104,6 +106,16 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
       .orderBy(Field.Sequence.name)
       .toStream(queueSize, enqueueTimeout)
       .mapAsync(parallelism)(event => asFirestoreRepr(persistenceId, event))
+  }
+
+  def eventsByTag(tag: String, offset: Long): Source[FirestorePersistentRepr, NotUsed] = {
+
+    db.collection(rootCollection)
+      .whereGreaterThanOrEqualTo(Field.Ordering.name, offset)
+      .whereArrayContains(Field.Tags.name, tag)
+      .orderBy(Field.Ordering.name)
+      .toStream(queueSize, enqueueTimeout)
+      .mapAsync(parallelism)(event => asFirestoreRepr(event.getReference.getParent.getParent.getId, event))
   }
 }
 
