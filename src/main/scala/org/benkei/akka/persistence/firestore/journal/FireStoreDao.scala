@@ -109,9 +109,8 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   }
 
   def eventsByTag(tag: String, offset: Long): Source[FirestorePersistentRepr, NotUsed] = {
-
-    db.collection(rootCollection)
-      .whereGreaterThanOrEqualTo(Field.Ordering.name, offset)
+    db.collectionGroup("event-journal")
+      .whereGreaterThan(Field.Ordering.name, offset)
       .whereArrayContains(Field.Tags.name, tag)
       .orderBy(Field.Ordering.name)
       .toStream(queueSize, enqueueTimeout)

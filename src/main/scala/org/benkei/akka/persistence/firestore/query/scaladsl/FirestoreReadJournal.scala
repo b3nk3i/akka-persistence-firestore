@@ -13,7 +13,7 @@ import com.google.cloud.firestore.Firestore
 import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.{FirestoreJournalConfig, FirestoreReadJournalConfig}
-import org.benkei.akka.persistence.firestore.journal.{FireStoreDao, FirestoreSerializer}
+import org.benkei.akka.persistence.firestore.journal.{FireStoreDao, FirestorePersistentRepr, FirestoreSerializer}
 
 import scala.collection.immutable.Seq
 import scala.concurrent.duration.DurationInt
@@ -67,6 +67,21 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     dao.persistenceIds()
   }
 
+  private def eventEnvelope(pr: FirestorePersistentRepr) = {
+    for {
+      event    <- serializer.deserialize(pr)
+      ordering <- serializer.ordering(pr)
+    } yield {
+      EventEnvelope(
+        offset = Offset.sequence(ordering),
+        persistenceId = event.persistenceId,
+        sequenceNr = event.sequenceNr,
+        event = event.payload,
+        timestamp = event.timestamp
+      )
+    }
+  }
+
   /**
     * Same type of query as `eventsByPersistenceId` but the event stream
     * is completed immediately when it reaches the end of the "result set". Events that are
@@ -79,16 +94,8 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
   ): Source[EventEnvelope, NotUsed] = {
     dao
       .events(persistenceId, fromSequenceNr, toSequenceNr)
-      .map(
-        pr =>
-          EventEnvelope(
-            offset = serializer.ordering(pr).fold(_ => Offset.noOffset, Offset.sequence),
-            persistenceId = pr.persistenceId,
-            sequenceNr = pr.sequence,
-            event = pr.data,
-            timestamp = serializer.timestamp(pr).getOrElse(0L)
-          )
-      )
+      .map(eventEnvelope)
+      .mapAsync(1) { Future.fromTry }
   }
 
   private def adaptEvents(repr: PersistentRepr): Seq[PersistentRepr] = {
@@ -106,8 +113,8 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
       }
 
     events
-      .mapAsync(1)(row => Future.fromTry(serializer.deserialize(row)))
-      .map(pr => EventEnvelope(offset, pr.persistenceId, pr.sequenceNr, pr.payload, pr.timestamp))
+      .map(eventEnvelope)
+      .mapAsync(1) { Future.fromTry }
   }
 
   override def eventsByTag(tag: String, offset: Offset): Source[EventEnvelope, NotUsed] = {
