@@ -7,7 +7,7 @@ import cats.implicits.toFunctorOps
 import com.google.cloud.firestore.{DocumentSnapshot, Firestore}
 import org.benkei.akka.persistence.firestore.data.Document.Document
 import org.benkei.akka.persistence.firestore.data.Field
-import org.benkei.akka.persistence.firestore.journal.FireStoreDao.asFirestoreRepr
+import org.benkei.akka.persistence.firestore.journal.FireStoreDao.{EventJournal, Sequences, asFirestoreRepr}
 import org.benkei.google.ApiFuturesOps.ApiFutureExt
 import org.benkei.google.FirestoreStreamingOps.StreamQueryOps
 
@@ -20,8 +20,6 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   ec:  ExecutionContextExecutor,
   mat: Materializer
 ) {
-
-  val Sequences = "sequences"
 
   def write(events: Seq[FirestorePersistentRepr]): Future[Unit] = {
 
@@ -41,7 +39,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
               transaction.create(
                 db.collection(rootCollection)
                   .document(event.persistenceId)
-                  .collection("event-journal")
+                  .collection(EventJournal)
                   .document(event.sequence.toString),
                 (event.data ++ ordering).asJava
               )
@@ -57,7 +55,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   def softDelete(persistenceId: String, toSequenceNr: Long): Future[Unit] = {
     db.collection(rootCollection)
       .document(persistenceId)
-      .collection("event-journal")
+      .collection(EventJournal)
       .whereLessThanOrEqualTo(Field.Sequence.name, toSequenceNr)
       .orderBy(Field.Sequence.name)
       .toStream(queueSize, enqueueTimeout)
@@ -78,7 +76,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   def readMaxSequenceNr(persistenceId: String, fromSequenceNr: Long): Future[Long] = {
     db.collection(rootCollection)
       .document(persistenceId)
-      .collection("event-journal")
+      .collection(EventJournal)
       .whereGreaterThanOrEqualTo(Field.Sequence.name, fromSequenceNr)
       .orderBy(Field.Sequence.name)
       .toStream(queueSize, enqueueTimeout)
@@ -100,7 +98,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   ): Source[FirestorePersistentRepr, NotUsed] = {
     db.collection(rootCollection)
       .document(persistenceId)
-      .collection("event-journal")
+      .collection(EventJournal)
       .whereGreaterThanOrEqualTo(Field.Sequence.name, fromSequenceNr)
       .whereLessThanOrEqualTo(Field.Sequence.name, toSequenceNr)
       .orderBy(Field.Sequence.name)
@@ -109,7 +107,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   }
 
   def eventsByTag(tag: String, offset: Long): Source[FirestorePersistentRepr, NotUsed] = {
-    db.collectionGroup("event-journal")
+    db.collectionGroup(EventJournal)
       .whereGreaterThan(Field.Ordering.name, offset)
       .whereArrayContains(Field.Tags.name, tag)
       .orderBy(Field.Ordering.name)
@@ -119,6 +117,10 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
 }
 
 object FireStoreDao {
+
+  val Sequences = "sequences"
+
+  val EventJournal = "event-journal"
 
   def asFirestoreRepr(persistenceId: String, result: DocumentSnapshot): Future[FirestorePersistentRepr] = {
     Option(result).filter(_.exists()) match {

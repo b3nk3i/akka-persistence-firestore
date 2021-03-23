@@ -88,8 +88,8 @@ class ScalaFirestoreReadJournalOperations(readJournal: FirestoreReadJournal)(imp
   def withCurrentEventsByTag(
     within: FiniteDuration
   )(tag:    String, offset: Offset)(f: TestSubscriber.Probe[EventEnvelope] => Unit): Unit = {
-    val tp = readJournal.currentEventsByTag(tag, offset)
-      .wireTap(m => println(m))
+    val tp = readJournal
+      .currentEventsByTag(tag, offset)
       .runWith(TestSink.probe[EventEnvelope])
     tp.within(within)(f(tp))
   }
