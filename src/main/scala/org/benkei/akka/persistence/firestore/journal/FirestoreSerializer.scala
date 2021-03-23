@@ -4,6 +4,7 @@ import akka.actor.Actor
 import akka.persistence.PersistentRepr
 import akka.persistence.journal.Tagged
 import akka.serialization.{Serialization, Serializers}
+import com.google.cloud.firestore.Blob
 import org.benkei.akka.persistence.firestore.data.Document._
 import org.benkei.akka.persistence.firestore.data.Field
 
@@ -39,7 +40,7 @@ object FirestoreSerializer {
           deleted       <- data.read(Field.Deleted)
           writerUUID    <- data.read(Field.WriterUUID)
           serializerId  <- data.read(Field.SerializerID)
-          event         <- serialization.deserialize(payload.getBytes, serializerId.toInt, manifest)
+          event         <- serialization.deserialize(payload.toBytes, serializerId.toInt, manifest)
         } yield {
           PersistentRepr(event, sequence, persistenceId, manifest, deleted, Actor.noSender, writerUUID)
         }
@@ -67,7 +68,7 @@ object FirestoreSerializer {
               updatedPr.writerUuid.write(Field.WriterUUID) ++
               updatedPr.timestamp.write(Field.Timestamp) ++
               serManifest.write(Field.Manifest) ++
-              new String(serPayload).write(Field.Payload) ++
+              Blob.fromBytes(serPayload).write(Field.Payload) ++
               serializer.identifier.toLong.write(Field.SerializerID) ++
               serTags.asJava.write(Field.Tags)
 
