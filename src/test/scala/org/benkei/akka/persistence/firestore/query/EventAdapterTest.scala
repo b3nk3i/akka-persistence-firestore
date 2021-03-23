@@ -1,4 +1,4 @@
-package org.benkei.akka.persistence.firestore
+package org.benkei.akka.persistence.firestore.query
 
 import akka.persistence.journal.{EventSeq, ReadEventAdapter, Tagged, WriteEventAdapter}
 

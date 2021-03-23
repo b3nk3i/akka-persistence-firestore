@@ -29,12 +29,12 @@ object Dependencies {
       )
 
     val Akka = List(
-      "com.typesafe.akka" %% "akka-persistence"     % Versions.Akka,
-      "com.typesafe.akka" %% "akka-slf4j"           % Versions.Akka % Test,
-      "com.typesafe.akka" %% "akka-slf4j"           % Versions.Akka % Test,
-      "com.typesafe.akka" %% "akka-persistence-tck" % Versions.Akka % Test,
-      "com.typesafe.akka" %% "akka-stream-testkit"  % Versions.Akka % Test,
-      "com.typesafe.akka" %% "akka-testkit"         % Versions.Akka % Test
+      "com.typesafe.akka" %% "akka-persistence"       % Versions.Akka,
+      "com.typesafe.akka" %% "akka-persistence-query" % Versions.Akka,
+      "com.typesafe.akka" %% "akka-slf4j"             % Versions.Akka % Test,
+      "com.typesafe.akka" %% "akka-persistence-tck"   % Versions.Akka % Test,
+      "com.typesafe.akka" %% "akka-stream-testkit"    % Versions.Akka % Test,
+      "com.typesafe.akka" %% "akka-testkit"           % Versions.Akka % Test
     )
 
     val Docker = List(
