@@ -19,7 +19,7 @@ object FirestoreStreamingOps {
 
       val (queue, source) =
         Source
-          .queue[DocumentSnapshot](max, OverflowStrategy.fail)
+          .queue[DocumentSnapshot](max, OverflowStrategy.backpressure)
           .preMaterialize()
 
       enqueueStream(query, queue, enqueueTimeout)

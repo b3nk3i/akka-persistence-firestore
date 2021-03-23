@@ -2,7 +2,8 @@ package org.benkei.akka.persistence.firestore.query
 
 import akka.Done
 import akka.pattern.ask
-import akka.persistence.query.{EventEnvelope, NoOffset, Sequence}
+import akka.persistence.query.{EventEnvelope, NoOffset, Offset, Sequence}
+import akka.stream.scaladsl.Source
 import com.typesafe.config.{ConfigFactory, ConfigValue, ConfigValueFactory}
 import org.benkei.akka.persistence.firestore.query.CurrentEventsByTagTest._
 import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{Event, TaggedAsyncEvent}
@@ -167,38 +168,61 @@ abstract class CurrentEventsByTagTest(config: String) extends QueryTestSpec(conf
     ConfigFactory.load(config)
   ) { implicit system =>
     val journalOps = new JavaDslJdbcReadJournalOperations(system)
-    import system.dispatcher
     withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
-      def sendMessagesWithTag(tag: String, numberOfMessagesPerActor: Int): Future[Done] = {
-        val futures = for (actor <- Seq(actor1, actor2, actor3); i <- 1 to numberOfMessagesPerActor) yield {
-          actor ? TaggedAsyncEvent(Event(i.toString), tag)
-        }
-        Future.sequence(futures).map(_ => Done)
+
+      def sendMessagesWithTag(tag: String, numberOfMessagesPerActor: Int) = {
+
+        val actors = Seq(actor1, actor2, actor3)
+
+        Source
+          .fromIterator(() => (1 to numberOfMessagesPerActor).iterator)
+          .flatMapConcat { i =>
+            Source
+              .fromIterator(() => actors.iterator)
+              .mapAsync(actors.size) { actor =>
+                actor ? TaggedAsyncEvent(Event(i.toString), tag)
+              }
+          }
       }
 
       val tag = "someTag"
+
       // send a batch of 3 * 200
-      val batch1 = sendMessagesWithTag(tag, 200)
+      val batch1Size = 30
+      val batch2Size = 300
+
+      val batch1 = sendMessagesWithTag(tag, batch1Size / 3).run()
+
       // Try to persist a large batch of events per actor. Some of these may be returned, but not all!
       // Reduced for 5.0.0 as we can no longer do a batch insert due to the insert returning the ordering
       // so trying to persist 1000s in a batch is slower
-      val batch2 = sendMessagesWithTag(tag, 2000)
+      val batch2 = sendMessagesWithTag(tag, batch2Size / 3).run()
 
-      // wait for acknowledgement of the first batch only
       batch1.futureValue
-      // Sanity check, all events in the first batch must be in the journal
-      journalOps.countJournal.futureValue should be >= 600L
 
-      // start the query before the last batch completes
+      // Sanity check, all events in the first batch must be in the journal
+      journalOps.countJournal.futureValue should be >= batch1Size.toLong
+
+      // start a query before 2nd stream completes without Offset
       journalOps.withCurrentEventsByTag()(tag, NoOffset) { tp =>
         // The stream must complete within the given amount of time
         // This make take a while in case the journal sequence actor detects gaps
         val allEvents = tp.toStrict(atMost = 20.seconds)
-        allEvents.size should be >= 600
+        allEvents.size should be >= batch1Size
         val expectedOffsets = 1L.to(allEvents.size).map(Sequence.apply)
-        allEvents.map(_.offset) shouldBe expectedOffsets
+        val foundOffsets = allEvents.map(_.offset)
+        foundOffsets shouldBe expectedOffsets
       }
-      batch2.futureValue
+
+      // start a 2nd query before 2nd stream completes with Offset on last batch1
+      journalOps.withCurrentEventsByTag()(tag, Offset.sequence(batch1Size)) { tp =>
+        val batch2Events = tp.toStrict(atMost = 20.seconds)
+
+        val expectedOffsets = (batch1Size + 1).toLong.to(batch1Size + batch2Events.size).map(Sequence.apply)
+
+        val foundOffsets = batch2Events.map(_.offset)
+        foundOffsets shouldBe expectedOffsets
+      }
     }
   }
 }
