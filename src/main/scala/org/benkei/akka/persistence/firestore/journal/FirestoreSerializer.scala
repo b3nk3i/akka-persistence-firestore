@@ -25,7 +25,7 @@ trait FirestoreSerializer {
 object FirestoreSerializer {
 
   /*
-    Default implementation based on Akka SerializerWithStringManifest.
+    Default implementation based on Akka Serialization.
    */
   def apply(serialization: Serialization): FirestoreSerializer =
     new FirestoreSerializer {
@@ -37,12 +37,14 @@ object FirestoreSerializer {
           sequence      <- data.read(Field.Sequence)
           persistenceId <- data.read(Field.PersistenceID)
           manifest      <- data.read(Field.Manifest)
+          timestamp     <- data.read(Field.Timestamp)
           deleted       <- data.read(Field.Deleted)
           writerUUID    <- data.read(Field.WriterUUID)
           serializerId  <- data.read(Field.SerializerID)
           event         <- serialization.deserialize(payload.toBytes, serializerId.toInt, manifest)
         } yield {
           PersistentRepr(event, sequence, persistenceId, manifest, deleted, Actor.noSender, writerUUID)
+            .withTimestamp(timestamp)
         }
       }
 

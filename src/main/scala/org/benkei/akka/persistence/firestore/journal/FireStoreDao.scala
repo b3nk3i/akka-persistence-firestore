@@ -25,6 +25,9 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
 
     val journalSequence = db.collection(rootCollection).document(Sequences)
 
+    // since events are persisted atomically, the batch gets the same timestamp
+    val now = System.currentTimeMillis()
+
     db.runTransaction { transaction =>
         val currentOrdering =
           transaction.get(journalSequence).get().getLong(Field.Ordering.name)
@@ -34,14 +37,14 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
             case (acc, event) =>
               val next = acc + 1
 
-              val ordering: Document = Map(Field.Ordering.name -> next)
+              val metaData: Document = Map(Field.Ordering.name -> next, Field.Timestamp.name -> now)
 
               transaction.create(
                 db.collection(rootCollection)
                   .document(event.persistenceId)
                   .collection(EventJournal)
                   .document(event.sequence.toString),
-                (event.data ++ ordering).asJava
+                (event.data ++ metaData).asJava
               )
               next
           }

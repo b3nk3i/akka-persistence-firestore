@@ -7,8 +7,8 @@ import akka.persistence.query._
 import akka.persistence.query.scaladsl._
 import akka.persistence.{Persistence, PersistentRepr}
 import akka.serialization.SerializationExtension
-import akka.stream.scaladsl.Source
-import akka.stream.{Materializer, SystemMaterializer}
+import akka.stream.scaladsl.{Sink, Source, SourceQueueWithComplete}
+import akka.stream.{Materializer, OverflowStrategy, SystemMaterializer}
 import com.google.cloud.firestore.Firestore
 import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.client.FireStoreExtension
@@ -118,7 +118,44 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
   }
 
   override def eventsByTag(tag: String, offset: Offset): Source[EventEnvelope, NotUsed] = {
-    ???
+
+    val (queue, source) =
+      Source
+        .queue[EventEnvelope](100, OverflowStrategy.backpressure)
+        .preMaterialize()
+
+    currentEventsByTag(tag, offset)
+      .mapAsync(1)(e => queue.offer(e).map(_ => e))
+      .runWith(Sink.lastOption)
+      .map {
+        case Some(latest) => eventsByTagPublisher(queue, tag, latest.offset)
+        case None         => eventsByTagPublisher(queue, tag, offset)
+      }
+      .foreach(_.run())
+
+    source
+  }
+
+  def eventsByTagPublisher(
+    queue:  SourceQueueWithComplete[EventEnvelope],
+    tag:    String,
+    offset: Offset
+  ): Source[EventEnvelope, NotUsed] = {
+
+    def retrieveNextBatch(from: Offset) = {
+      currentEventsByTag(tag, from)
+        .mapAsync(1)(e => queue.offer(e).map(_ => e))
+        .runWith(Sink.lastOption)
+        .map(_.map(e => (e.offset, e)))
+    }
+
+    Source.unfoldAsync(offset) { from =>
+      retrieveNextBatch(from)
+        .flatMap {
+          case Some((s, e)) => Future.successful(Some((s, e)))
+          case None         => akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(retrieveNextBatch(from))
+        }
+    }
   }
 
   override def persistenceIds(): Source[String, NotUsed] = {
