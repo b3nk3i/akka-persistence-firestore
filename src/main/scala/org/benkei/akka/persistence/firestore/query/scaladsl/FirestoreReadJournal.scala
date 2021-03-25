@@ -120,7 +120,7 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
 
     val (queue, source) =
       Source
-        .queue[EventEnvelope](100, OverflowStrategy.backpressure)
+        .queue[EventEnvelope](readJournalConfig.maxBufferSize, OverflowStrategy.backpressure)
         .preMaterialize()
 
     currentEventsByTag(tag, offset)
