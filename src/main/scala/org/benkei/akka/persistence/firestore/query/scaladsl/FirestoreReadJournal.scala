@@ -168,16 +168,28 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
         .queue[String](readJournalConfig.maxBufferSize, OverflowStrategy.backpressure)
         .preMaterialize()
 
+    val empty = Set.empty[String]
+
+    def retrieveNextBatch(knownIds: Set[String]) = {
+      currentPersistenceIds()
+        .mapAsync(1) { id =>
+          if (knownIds.contains(id)) Future.successful(id)
+          else queue.offer(id).map(_ => id)
+        }
+        .fold(knownIds) { _ + _ }
+        .map((_, ()))
+        .runWith(Sink.lastOption)
+    }
+
     Source
-      .unfoldAsync(Set.empty[String]) { knownIds =>
-        currentPersistenceIds()
-          .mapAsync(1) { id =>
-            if (knownIds.contains(id)) Future.successful(id)
-            else queue.offer(id).map(_ => id)
+      .unfoldAsync(empty) { knownIds =>
+        retrieveNextBatch(knownIds)
+          .flatMap {
+            case Some(ids) =>
+              Future.successful(Some(ids))
+            case None =>
+              akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(retrieveNextBatch(knownIds))
           }
-          .fold(knownIds) { _ + _ }
-          .map((_, ()))
-          .runWith(Sink.lastOption)
       }
       .run()
 
