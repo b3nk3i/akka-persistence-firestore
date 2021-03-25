@@ -15,6 +15,7 @@ import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.{FirestoreJournalConfig, FirestoreReadJournalConfig}
 import org.benkei.akka.persistence.firestore.journal.{FireStoreDao, FirestorePersistentRepr, FirestoreSerializer}
 
+import scala.collection.immutable.Set
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
@@ -157,8 +158,30 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     }
   }
 
+  /*
+    infinite pull of persistenceIds from journal
+   */
   override def persistenceIds(): Source[String, NotUsed] = {
-    ???
+
+    val (queue, source) =
+      Source
+        .queue[String](readJournalConfig.maxBufferSize, OverflowStrategy.backpressure)
+        .preMaterialize()
+
+    Source
+      .unfoldAsync(Set.empty[String]) { knownIds =>
+        currentPersistenceIds()
+          .mapAsync(1) { id =>
+            if (knownIds.contains(id)) Future.successful(id)
+            else queue.offer(id).map(_ => id)
+          }
+          .fold(knownIds) { _ + _ }
+          .map((_, ()))
+          .runWith(Sink.lastOption)
+      }
+      .run()
+
+    source
   }
 
   override def eventsByPersistenceId(
