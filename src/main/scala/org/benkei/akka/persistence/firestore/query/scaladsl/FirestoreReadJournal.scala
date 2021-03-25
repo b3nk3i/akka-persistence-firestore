@@ -3,9 +3,9 @@ package scaladsl
 
 import akka.NotUsed
 import akka.actor.ActorSystem
+import akka.persistence.Persistence
 import akka.persistence.query._
 import akka.persistence.query.scaladsl._
-import akka.persistence.{Persistence, PersistentRepr}
 import akka.serialization.SerializationExtension
 import akka.stream.scaladsl.{Sink, Source, SourceQueueWithComplete}
 import akka.stream.{Materializer, OverflowStrategy, SystemMaterializer}
@@ -15,7 +15,6 @@ import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.{FirestoreJournalConfig, FirestoreReadJournalConfig}
 import org.benkei.akka.persistence.firestore.journal.{FireStoreDao, FirestorePersistentRepr, FirestoreSerializer}
 
-import scala.collection.immutable.Seq
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
@@ -72,13 +71,16 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
       event    <- serializer.deserialize(pr)
       ordering <- serializer.ordering(pr)
     } yield {
-      EventEnvelope(
-        offset = Offset.sequence(ordering),
-        persistenceId = event.persistenceId,
-        sequenceNr = event.sequenceNr,
-        event = event.payload,
-        timestamp = event.timestamp
-      )
+      val adapter = eventAdapters.get(event.payload.getClass)
+      adapter.fromJournal(event.payload, event.manifest).events.map { payload =>
+        EventEnvelope(
+          offset = Offset.sequence(ordering),
+          persistenceId = event.persistenceId,
+          sequenceNr = event.sequenceNr,
+          event = payload,
+          timestamp = event.timestamp
+        )
+      }
     }
   }
 
@@ -96,11 +98,7 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
       .events(persistenceId, fromSequenceNr, toSequenceNr)
       .map(eventEnvelope)
       .mapAsync(1) { Future.fromTry }
-  }
-
-  private def adaptEvents(repr: PersistentRepr): Seq[PersistentRepr] = {
-    val adapter = eventAdapters.get(repr.payload.getClass)
-    adapter.fromJournal(repr.payload, repr.manifest).events.map(repr.withPayload)
+      .mapConcat[EventEnvelope](identity)
   }
 
   override def currentEventsByTag(tag: String, offset: Offset): Source[EventEnvelope, NotUsed] = {
@@ -115,6 +113,7 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     events
       .map(eventEnvelope)
       .mapAsync(1) { Future.fromTry }
+      .mapConcat[EventEnvelope](identity)
   }
 
   override def eventsByTag(tag: String, offset: Offset): Source[EventEnvelope, NotUsed] = {

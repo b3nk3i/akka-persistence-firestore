@@ -200,7 +200,7 @@ abstract class EventsByTagTest(config: String) extends QueryTestSpec(config, con
   ) { implicit system =>
     val journalOps            = new ScalaFirestoreReadJournalOperations(system)
     val msgCountPerActor      = 20
-    val numberOfActors        = 100
+    val numberOfActors        = 10
     val totalNumberOfMessages = msgCountPerActor * numberOfActors
     withManyTestActors(numberOfActors) { actors =>
       val actorsWithIndexes = actors.zipWithIndex
@@ -211,8 +211,9 @@ abstract class EventsByTagTest(config: String) extends QueryTestSpec(config, con
 
       journalOps.withEventsByTag()("myEvent", NoOffset) { tp =>
         tp.request(Int.MaxValue)
-        (1 to totalNumberOfMessages).foldLeft(Map.empty[Int, Int]) { (map, _) =>
-          val mgsParts      = tp.expectNext().event.asInstanceOf[EventRestored].value.split("-")
+        (1 to totalNumberOfMessages).foldLeft(Map.empty[Int, Int]) { case (map, idx) =>
+          val eventRestored = tp.expectNext()
+          val mgsParts      = eventRestored.event.asInstanceOf[EventRestored].value.split("-")
           val actorIdx      = mgsParts(0).toInt
           val msgNumber     = mgsParts(1).toInt
           val expectedCount = map.getOrElse(actorIdx, 0)
