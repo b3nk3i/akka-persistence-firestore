@@ -166,6 +166,64 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     fromSequenceNr: Long,
     toSequenceNr:   Long
   ): Source[EventEnvelope, NotUsed] = {
-    ???
+
+    val empty = Source.empty[EventEnvelope]
+
+    if (fromSequenceNr > toSequenceNr) {
+      empty
+    } else {
+      val (queue, source) =
+        Source
+          .queue[EventEnvelope](readJournalConfig.maxBufferSize, OverflowStrategy.backpressure)
+          .preMaterialize()
+
+      currentEventsByPersistenceId(persistenceId, fromSequenceNr, toSequenceNr)
+        .mapAsync(1)(e => queue.offer(e).map(_ => e))
+        .runWith(Sink.lastOption)
+        .map {
+          case Some(latest) =>
+            if (latest.sequenceNr >= toSequenceNr) {
+              // current events reached toSequenceNr, nothing more to enqueue
+              queue.complete()
+              empty
+            } else {
+              eventsByPersistenceIdPublisher(queue, persistenceId, latest.sequenceNr + 1, toSequenceNr)
+            }
+          case None =>
+            eventsByPersistenceIdPublisher(queue, persistenceId, fromSequenceNr, toSequenceNr)
+        }
+        .foreach(_.run())
+
+      source
+    }
+  }
+
+  def eventsByPersistenceIdPublisher(
+    queue:          SourceQueueWithComplete[EventEnvelope],
+    persistenceId:  String,
+    fromSequenceNr: Long,
+    toSequenceNr:   Long
+  ): Source[EventEnvelope, NotUsed] = {
+
+    def retrieveNextBatch(from: Long) = {
+      currentEventsByPersistenceId(persistenceId, from, toSequenceNr)
+        .mapAsync(1)(e => queue.offer(e).map(_ => e))
+        .runWith(Sink.lastOption)
+        .map(_.map(e => (e.sequenceNr, e)))
+    }
+
+    Source.unfoldAsync(fromSequenceNr) { from =>
+      retrieveNextBatch(from)
+        .flatMap {
+          case Some((s, _)) if s >= toSequenceNr =>
+            // reached last offset - stop pulling & complete the queue
+            queue.complete()
+            Future.successful(None)
+          case Some((s, e)) =>
+            Future.successful(Some((s + 1, e))) // continue to pull
+          case None =>
+            akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(retrieveNextBatch(from))
+        }
+    }
   }
 }
