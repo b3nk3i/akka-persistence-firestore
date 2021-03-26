@@ -10,7 +10,8 @@ import com.google.cloud.firestore.Firestore
 import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.FirestoreJournalConfig
-import akka.event.{ Logging, LoggingAdapter }
+import akka.event.{Logging, LoggingAdapter}
+import org.benkei.akka.persistence.firestore.serialization.FirestoreSerializer
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.Try

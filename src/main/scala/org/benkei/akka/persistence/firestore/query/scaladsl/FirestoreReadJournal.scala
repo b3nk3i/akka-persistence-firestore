@@ -13,7 +13,8 @@ import com.google.cloud.firestore.Firestore
 import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.{FirestoreJournalConfig, FirestoreReadJournalConfig}
-import org.benkei.akka.persistence.firestore.journal.{FireStoreDao, FirestorePersistentRepr, FirestoreSerializer}
+import org.benkei.akka.persistence.firestore.journal.{FireStoreDao, FirestorePersistentRepr}
+import org.benkei.akka.persistence.firestore.serialization.FirestoreSerializer
 
 import scala.collection.immutable.Set
 import scala.concurrent.duration.DurationInt

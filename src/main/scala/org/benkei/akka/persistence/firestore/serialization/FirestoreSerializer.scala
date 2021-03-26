@@ -1,4 +1,4 @@
-package org.benkei.akka.persistence.firestore.journal
+package org.benkei.akka.persistence.firestore.serialization
 
 import akka.actor.Actor
 import akka.persistence.PersistentRepr
@@ -7,6 +7,7 @@ import akka.serialization.{Serialization, Serializers}
 import com.google.cloud.firestore.Blob
 import org.benkei.akka.persistence.firestore.data.Document._
 import org.benkei.akka.persistence.firestore.data.Field
+import org.benkei.akka.persistence.firestore.journal.FirestorePersistentRepr
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try

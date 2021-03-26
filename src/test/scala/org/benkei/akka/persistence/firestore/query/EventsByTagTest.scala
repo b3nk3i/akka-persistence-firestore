@@ -1,19 +1,12 @@
 package org.benkei.akka.persistence.firestore.query
 
-import akka.Done
 import akka.pattern.ask
 import akka.persistence.query.{EventEnvelope, NoOffset, Sequence}
 import akka.stream.scaladsl.Source
 import com.typesafe.config.{ConfigFactory, ConfigValue, ConfigValueFactory}
-import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{
-  Event,
-  EventRestored,
-  TaggedAsyncEvent,
-  TaggedEvent
-}
+import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{Event, EventRestored, TaggedAsyncEvent, TaggedEvent}
 import org.benkei.akka.persistence.firestore.query.EventsByTagTest._
 
-import scala.concurrent.Future
 import scala.concurrent.duration._
 
 object EventsByTagTest {
