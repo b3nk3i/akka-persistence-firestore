@@ -3,8 +3,14 @@ package org.benkei.akka.persistence.firestore.query
 import akka.Done
 import akka.pattern.ask
 import akka.persistence.query.{EventEnvelope, NoOffset, Sequence}
+import akka.stream.scaladsl.Source
 import com.typesafe.config.{ConfigFactory, ConfigValue, ConfigValueFactory}
-import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{Event, EventRestored, TaggedAsyncEvent, TaggedEvent}
+import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{
+  Event,
+  EventRestored,
+  TaggedAsyncEvent,
+  TaggedEvent
+}
 import org.benkei.akka.persistence.firestore.query.EventsByTagTest._
 
 import scala.concurrent.Future
@@ -211,15 +217,16 @@ abstract class EventsByTagTest(config: String) extends QueryTestSpec(config, con
 
       journalOps.withEventsByTag()("myEvent", NoOffset) { tp =>
         tp.request(Int.MaxValue)
-        (1 to totalNumberOfMessages).foldLeft(Map.empty[Int, Int]) { case (map, idx) =>
-          val eventRestored = tp.expectNext()
-          val mgsParts      = eventRestored.event.asInstanceOf[EventRestored].value.split("-")
-          val actorIdx      = mgsParts(0).toInt
-          val msgNumber     = mgsParts(1).toInt
-          val expectedCount = map.getOrElse(actorIdx, 0)
-          assertResult(expected = expectedCount)(msgNumber)
-          // keep track of the next message number we expect for this actor idx
-          map.updated(actorIdx, msgNumber + 1)
+        (1 to totalNumberOfMessages).foldLeft(Map.empty[Int, Int]) {
+          case (map, idx) =>
+            val eventRestored = tp.expectNext()
+            val mgsParts      = eventRestored.event.asInstanceOf[EventRestored].value.split("-")
+            val actorIdx      = mgsParts(0).toInt
+            val msgNumber     = mgsParts(1).toInt
+            val expectedCount = map.getOrElse(actorIdx, 0)
+            assertResult(expected = expectedCount)(msgNumber)
+            // keep track of the next message number we expect for this actor idx
+            map.updated(actorIdx, msgNumber + 1)
         }
         tp.cancel()
         tp.expectNoMessage(NoMsgTime)
@@ -380,40 +387,55 @@ abstract class EventsByTagTest(config: String) extends QueryTestSpec(config, con
   it should "show the configured performance characteristics" in withActorSystem(ConfigFactory.load(config)) {
     implicit system =>
       val journalOps = new ScalaFirestoreReadJournalOperations(system)
+
       withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
-        def sendMessagesWithTag(tag: String, numberOfMessagesPerActor: Int): Future[Done] = {
-          val futures = for (actor <- Seq(actor1, actor2, actor3); i <- 1 to numberOfMessagesPerActor) yield {
-            actor ? TaggedAsyncEvent(Event(i.toString), tag)
-          }
-          Future.sequence(futures).map(_ => Done)
+        def sendMessagesWithTag(tag: String, numberOfMessagesPerActor: Int) = {
+
+          val actors = Seq(actor1, actor2, actor3)
+
+          Source
+            .fromIterator(() => (1 to numberOfMessagesPerActor).iterator)
+            .flatMapConcat { i =>
+              Source
+                .fromIterator(() => actors.iterator)
+                .mapAsync(actors.size) { actor =>
+                  actor ? TaggedAsyncEvent(Event(i.toString), tag)
+                }
+            }
         }
 
+        val actorNr = 3
+        val batch1  = 10
+
         val tag1 = "someTag"
-        // send a batch of 3 * 50
-        sendMessagesWithTag(tag1, 50)
+        // send a batch of 3 * 10
+        sendMessagesWithTag(tag1, batch1).run()
 
         // start the query before the future completes
         journalOps.withEventsByTag()(tag1, NoOffset) { tp =>
-          tp.within(5.seconds) {
-            tp.request(Int.MaxValue)
-            tp.expectNextN(150)
-          }
+          tp.request(Int.MaxValue)
+          tp.expectNextN(actorNr * batch1)
+
           tp.expectNoMessage(NoMsgTime)
 
+          val batch2 = 5
           // Send a small batch of 3 * 5 messages
-          sendMessagesWithTag(tag1, 5)
+          sendMessagesWithTag(tag1, batch2).run()
           // Since queries are executed `refreshInterval`, there must be a small delay before this query gives a result
-          tp.within(min = refreshInterval / 2, max = 2.seconds * timeoutMultiplier) {
-            tp.expectNextN(15)
+          tp.within(min = refreshInterval / 2, max = batch2 * actorNr * refreshInterval) {
+            tp.expectNextN(actorNr * batch2)
           }
           tp.expectNoMessage(NoMsgTime)
 
-          // another large batch should be retrieved fast
-          // send a second batch of 3 * 100
-          sendMessagesWithTag(tag1, 100)
-          tp.within(min = refreshInterval / 2, max = 10.seconds * timeoutMultiplier) {
+          // another batch should be retrieved fast
+          // send a second batch of 3 * 10
+          val batch3 = 10
+
+          sendMessagesWithTag(tag1, batch3).run()
+
+          tp.within(min = refreshInterval / 2, max = batch3 * actorNr * refreshInterval) {
             tp.request(Int.MaxValue)
-            tp.expectNextN(300)
+            tp.expectNextN(actorNr * batch3)
           }
           tp.expectNoMessage(NoMsgTime)
         }
