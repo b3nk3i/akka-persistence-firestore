@@ -2,7 +2,7 @@ package org.benkei.akka.persistence.firestore
 
 import akka.persistence.CapabilityFlag
 import akka.persistence.journal.JournalSpec
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 import org.benkei.akka.persistence.firestore.util.FirestoreUtil
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
@@ -32,3 +32,13 @@ abstract class AbstractCloudFirestoreJournalSpec(config: Config)
 }
 
 class CloudFirestoreJournalSpec extends AbstractCloudFirestoreJournalSpec(ConfigFactory.load("application.conf"))
+
+class CloudFirestoreJournalNativeSpec
+    extends AbstractCloudFirestoreJournalSpec(
+      ConfigFactory
+        .load("application.conf")
+        .withValue(
+          "akka-persistence-firestore.payload-serializer-fqcn",
+          ConfigValueFactory.fromAnyRef("org.benkei.akka.persistence.firestore.serialization.TestSerializer")
+        )
+    )
