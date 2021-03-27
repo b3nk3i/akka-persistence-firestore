@@ -6,7 +6,6 @@ import akka.actor.ActorSystem
 import akka.persistence.Persistence
 import akka.persistence.query._
 import akka.persistence.query.scaladsl._
-import akka.serialization.SerializationExtension
 import akka.stream.scaladsl.{Sink, Source, SourceQueueWithComplete}
 import akka.stream.{Materializer, OverflowStrategy, SystemMaterializer}
 import com.google.cloud.firestore.Firestore
@@ -15,6 +14,7 @@ import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.{FirestoreJournalConfig, FirestoreReadJournalConfig}
 import org.benkei.akka.persistence.firestore.journal.{FireStoreDao, FirestorePersistentRepr}
 import org.benkei.akka.persistence.firestore.serialization.FirestoreSerializer
+import org.benkei.akka.persistence.firestore.serialization.extention.FirestorePayloadSerializerExtension
 
 import scala.collection.immutable.Set
 import scala.concurrent.duration.DurationInt
@@ -53,7 +53,7 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     Source.tick(readJournalConfig.refreshInterval, 0.seconds, 0).take(1)
 
   val serializer: FirestoreSerializer = {
-    FirestoreSerializer(SerializationExtension(system))
+    FirestoreSerializer(FirestorePayloadSerializerExtension(system).payloadSerializer(config))
   }
 
   val dao = new FireStoreDao(

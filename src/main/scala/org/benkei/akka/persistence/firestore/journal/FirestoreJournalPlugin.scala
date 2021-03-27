@@ -12,6 +12,7 @@ import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.FirestoreJournalConfig
 import akka.event.{Logging, LoggingAdapter}
 import org.benkei.akka.persistence.firestore.serialization.FirestoreSerializer
+import org.benkei.akka.persistence.firestore.serialization.extention.FirestorePayloadSerializerExtension
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.Try
@@ -30,7 +31,7 @@ class FirestoreJournalPlugin(config: Config) extends AsyncWriteJournal {
   val db: Firestore = FireStoreExtension(context.system).client(config)
 
   val serializer: FirestoreSerializer = {
-    FirestoreSerializer(SerializationExtension(context.system))
+    FirestoreSerializer(FirestorePayloadSerializerExtension(context.system).payloadSerializer(config))
   }
 
   val journalConfig: FirestoreJournalConfig = FirestoreJournalConfig(config)
@@ -56,7 +57,12 @@ class FirestoreJournalPlugin(config: Config) extends AsyncWriteJournal {
     /*
       persistAll triggers asyncWriteMessages with a Seq of events, it is assumed they have the same persistenceId
      */
-    log.debug("asyncWriteMessages from sequence number [{}] for persistenceId [{}] [{}]", fromSequenceNr, persistenceId, sender())
+    log.debug(
+      "asyncWriteMessages from sequence number [{}] for persistenceId [{}] [{}]",
+      fromSequenceNr,
+      persistenceId,
+      sender()
+    )
 
     Source
       .fromIterator(() => messages.iterator)
