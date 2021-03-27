@@ -4,16 +4,15 @@ import com.github.dockerjava.core.DefaultDockerClientConfig
 import com.typesafe.config.Config
 import com.whisk.docker.impl.dockerjava.{Docker, DockerJavaExecutorFactory}
 import com.whisk.docker.{DockerContainer, DockerFactory, DockerKit, DockerReadyChecker}
-import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.{Eventually, IntegrationPatience, ScalaFutures}
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.wordspec.AnyWordSpecLike
+import org.scalatest.{BeforeAndAfterAll, TestSuite}
 import org.slf4s.Logging
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 trait FirestoreEmulator
-    extends AnyWordSpecLike
+    extends TestSuite
     with Matchers
     with BeforeAndAfterAll
     with DockerKit
