@@ -1,8 +1,10 @@
 package org.benkei.akka.persistence.firestore.journal
 
+import akka.Done
+import akka.actor.CoordinatedShutdown
+import akka.event.{Logging, LoggingAdapter}
 import akka.persistence.journal.AsyncWriteJournal
 import akka.persistence.{AtomicWrite, PersistentRepr}
-import akka.serialization.SerializationExtension
 import akka.stream.scaladsl.Source
 import akka.stream.{Materializer, SystemMaterializer}
 import cats.implicits._
@@ -10,7 +12,6 @@ import com.google.cloud.firestore.Firestore
 import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.FirestoreJournalConfig
-import akka.event.{Logging, LoggingAdapter}
 import org.benkei.akka.persistence.firestore.serialization.FirestoreSerializer
 import org.benkei.akka.persistence.firestore.serialization.extention.FirestorePayloadSerializerExtension
 
@@ -29,6 +30,10 @@ class FirestoreJournalPlugin(config: Config) extends AsyncWriteJournal {
   implicit val mat: Materializer = SystemMaterializer(context.system).materializer
 
   val db: Firestore = FireStoreExtension(context.system).client(config)
+
+  CoordinatedShutdown(context.system).addTask(CoordinatedShutdown.PhaseBeforeServiceUnbind, "closeJournalFirestore") {
+    () => Future(db.close()).map(_ => Done)
+  }
 
   val serializer: FirestoreSerializer = {
     FirestoreSerializer(FirestorePayloadSerializerExtension(context.system).payloadSerializer(config))

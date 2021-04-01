@@ -1,13 +1,13 @@
 package org.benkei.akka.persistence.firestore.query
 package scaladsl
 
-import akka.NotUsed
-import akka.actor.ActorSystem
+import akka.actor.{ActorSystem, CoordinatedShutdown}
 import akka.persistence.Persistence
 import akka.persistence.query._
 import akka.persistence.query.scaladsl._
 import akka.stream.scaladsl.{Sink, Source, SourceQueueWithComplete}
 import akka.stream.{Materializer, OverflowStrategy, SystemMaterializer}
+import akka.{Done, NotUsed}
 import com.google.cloud.firestore.Firestore
 import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.client.FireStoreExtension
@@ -38,6 +38,10 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
   implicit val mat: Materializer = SystemMaterializer(system).materializer
 
   val db: Firestore = FireStoreExtension(system).client(config)
+
+  CoordinatedShutdown(system).addTask(CoordinatedShutdown.PhaseBeforeServiceUnbind, "closeReadJournalFirestore") { () =>
+    Future(db.close()).map(_ => Done)
+  }
 
   val journalConfig: FirestoreJournalConfig = FirestoreJournalConfig(config)
 
