@@ -243,16 +243,16 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     persistenceId:  String,
     fromSequenceNr: Long,
     toSequenceNr:   Long
-  ): Source[EventEnvelope, NotUsed] = {
+  ): Source[Unit, NotUsed] = {
 
     def retrieveNextBatch(from: Long) = {
       currentEventsByPersistenceId(persistenceId, from, toSequenceNr)
         .mapAsync(1)(e => queue.offer(e).map(_ => e))
         .runWith(Sink.lastOption)
-        .map(_.map(e => (e.sequenceNr, e)))
+        .map(_.map(e => (e.sequenceNr, None)))
     }
 
-    Source.unfoldAsync(fromSequenceNr) { from =>
+    Source.unfoldAsync[Long, Unit](fromSequenceNr) { from =>
       retrieveNextBatch(from)
         .flatMap {
           case Some((s, _)) if s >= toSequenceNr =>
@@ -260,9 +260,9 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
             queue.complete()
             Future.successful(None)
           case Some((s, e)) =>
-            Future.successful(Some((s + 1, e))) // continue to pull
+            Future.successful(Some((s + 1, ()))) // continue to pull
           case None =>
-            akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(retrieveNextBatch(from))
+            akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(Future.successful(Some((from, ()))))
         }
     }
   }
