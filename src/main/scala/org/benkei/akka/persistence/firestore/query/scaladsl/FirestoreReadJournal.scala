@@ -209,7 +209,7 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
 
     val empty = Source.empty[EventEnvelope]
 
-    if (fromSequenceNr > toSequenceNr) {
+    if (Math.max(1, fromSequenceNr) > toSequenceNr) {
       empty
     } else {
       val (queue, source) =
