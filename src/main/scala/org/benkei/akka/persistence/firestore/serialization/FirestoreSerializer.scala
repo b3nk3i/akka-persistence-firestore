@@ -3,10 +3,12 @@ package org.benkei.akka.persistence.firestore.serialization
 import akka.actor.Actor
 import akka.persistence.PersistentRepr
 import akka.persistence.journal.Tagged
+import akka.persistence.query.Offset
 import org.benkei.akka.persistence.firestore.data.Document._
 import org.benkei.akka.persistence.firestore.data.Field
 import org.benkei.akka.persistence.firestore.journal.FirestorePersistentRepr
 
+import java.util.UUID
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
@@ -16,7 +18,7 @@ trait FirestoreSerializer {
 
   def deserialize(fpr: FirestorePersistentRepr): Try[PersistentRepr]
 
-  def ordering(fpr: FirestorePersistentRepr): Try[Long]
+  def ordering(fpr: FirestorePersistentRepr): Try[Offset]
 
   def timestamp(fpr: FirestorePersistentRepr): Try[Long]
 }
@@ -72,8 +74,8 @@ object FirestoreSerializer {
 
       }
 
-      override def ordering(fpr: FirestorePersistentRepr): Try[Long] = {
-        fpr.data.read(Field.Ordering)
+      override def ordering(fpr: FirestorePersistentRepr): Try[Offset] = {
+        fpr.data.read(Field.Ordering).map(UUID.fromString).map(Offset.timeBasedUUID)
       }
 
       override def timestamp(fpr: FirestorePersistentRepr): Try[Long] = {

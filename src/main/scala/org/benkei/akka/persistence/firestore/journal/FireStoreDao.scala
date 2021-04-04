@@ -4,10 +4,11 @@ import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import cats.implicits.toFunctorOps
+import com.fasterxml.uuid.Generators
 import com.google.cloud.firestore.{DocumentSnapshot, Firestore}
 import org.benkei.akka.persistence.firestore.data.Document.Document
 import org.benkei.akka.persistence.firestore.data.Field
-import org.benkei.akka.persistence.firestore.journal.FireStoreDao.{EventJournal, Sequences, asFirestoreRepr}
+import org.benkei.akka.persistence.firestore.journal.FireStoreDao.{EventJournal, asFirestoreRepr}
 import org.benkei.google.ApiFuturesOps.ApiFutureExt
 import org.benkei.google.FirestoreStreamingOps.StreamQueryOps
 
@@ -23,36 +24,25 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
 
   def write(events: Seq[FirestorePersistentRepr]): Future[Unit] = {
 
-    val journalSequence = db.collection(rootCollection).document(Sequences)
-
     // since events are persisted atomically, the batch gets the same timestamp
     val now = System.currentTimeMillis()
 
-    db.runTransaction { transaction =>
-        val currentOrdering =
-          transaction.get(journalSequence).get().getLong(Field.Ordering.name)
+    val batch = db.batch()
 
-        val lastOrdering =
-          events.foldLeft(currentOrdering) {
-            case (acc, event) =>
-              val next = acc + 1
+    events.foreach { event =>
+      val metaData: Document =
+        Map(Field.Ordering.name -> Generators.timeBasedGenerator().generate().toString, Field.Timestamp.name -> now)
 
-              val metaData: Document = Map(Field.Ordering.name -> next, Field.Timestamp.name -> now)
+      batch.create(
+        db.collection(rootCollection)
+          .document(event.persistenceId)
+          .collection(EventJournal)
+          .document(event.sequence.toString),
+        (event.data ++ metaData).asJava
+      )
+    }
 
-              transaction.create(
-                db.collection(rootCollection)
-                  .document(event.persistenceId)
-                  .collection(EventJournal)
-                  .document(event.sequence.toString),
-                (event.data ++ metaData).asJava
-              )
-              next
-          }
-
-        transaction.update(journalSequence, Field.Ordering.name, lastOrdering)
-      }
-      .futureLift
-      .void
+    batch.commit().futureLift.void
   }
 
   def softDelete(persistenceId: String, toSequenceNr: Long): Future[Unit] = {
@@ -91,7 +81,6 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
     Source
       .fromIterator(() => db.collection(rootCollection).listDocuments().iterator().asScala)
       .map(ref => ref.getId)
-      .filterNot(_ == Sequences)
   }
 
   def events(
@@ -109,7 +98,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
       .mapAsync(parallelism)(event => asFirestoreRepr(persistenceId, event))
   }
 
-  def eventsByTag(tag: String, offset: Long): Source[FirestorePersistentRepr, NotUsed] = {
+  def eventsByTag(tag: String, offset: String): Source[FirestorePersistentRepr, NotUsed] = {
     db.collectionGroup(EventJournal)
       .whereGreaterThan(Field.Ordering.name, offset)
       .whereArrayContains(Field.Tags.name, tag)
@@ -120,8 +109,6 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
 }
 
 object FireStoreDao {
-
-  val Sequences = "sequences"
 
   val EventJournal = "event-journal"
 

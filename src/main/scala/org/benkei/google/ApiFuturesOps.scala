@@ -13,8 +13,9 @@ object ApiFuturesOps {
       ApiFutures.addCallback(
         apiFuture,
         new ApiFutureCallback[T] {
-          def onFailure(t:      Throwable): Unit = p.failure(t)
-          def onSuccess(result: T):         Unit = p.success(result)
+          def onFailure(t: Throwable): Unit = p.failure(t)
+
+          def onSuccess(result: T): Unit = p.success(result)
         },
         ec
       )

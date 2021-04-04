@@ -80,7 +80,7 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
       val adapter = eventAdapters.get(event.payload.getClass)
       adapter.fromJournal(event.payload, event.manifest).events.map { payload =>
         EventEnvelope(
-          offset = Offset.sequence(ordering),
+          offset = ordering,
           persistenceId = event.persistenceId,
           sequenceNr = event.sequenceNr,
           event = payload,
@@ -110,10 +110,9 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
   override def currentEventsByTag(tag: String, offset: Offset): Source[EventEnvelope, NotUsed] = {
     val events =
       offset match {
-        case NoOffset         => dao.eventsByTag(tag, 0)
-        case Sequence(ordNr)  => dao.eventsByTag(tag, ordNr)
-        case TimeBasedUUID(_) => ???
-        case _                => ???
+        case NoOffset            => dao.eventsByTag(tag, "")
+        case TimeBasedUUID(uuid) => dao.eventsByTag(tag, uuid.toString)
+        case _                   => ???
       }
 
     events
@@ -145,19 +144,19 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     queue:  SourceQueueWithComplete[EventEnvelope],
     tag:    String,
     offset: Offset
-  ): Source[EventEnvelope, NotUsed] = {
+  ): Source[Unit, NotUsed] = {
 
     def retrieveNextBatch(from: Offset) = {
       currentEventsByTag(tag, from)
         .mapAsync(1)(e => queue.offer(e).map(_ => e))
         .runWith(Sink.lastOption)
-        .map(_.map(e => (e.offset, e)))
+        .map(_.map(e => (e.offset, ())))
     }
 
     Source.unfoldAsync(offset) { from =>
       retrieveNextBatch(from)
         .flatMap {
-          case Some((s, e)) => Future.successful(Some((s, e)))
+          case Some((s, e)) => Future.successful(Some((s, ())))
           case None         => akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(retrieveNextBatch(from))
         }
     }
@@ -193,7 +192,9 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
             case Some(ids) =>
               Future.successful(Some(ids))
             case None =>
-              akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(retrieveNextBatch(knownIds))
+              akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(
+                Future.successful(Some((knownIds, ())))
+              )
           }
       }
       .run()

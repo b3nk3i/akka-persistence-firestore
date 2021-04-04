@@ -8,7 +8,7 @@ sealed trait Field[-T] {
 
 object Field {
 
-  case object Ordering      extends Field[Long] { val name = "ordering" }
+  case object Ordering      extends Field[String] { val name = "ordering" }
   case object Payload       extends Field[Blob] { val name = "payload" }
   case object Sequence      extends Field[Long] { val name = "sequence" }
   case object PersistenceID extends Field[String] { val name = "persistence-id" }
