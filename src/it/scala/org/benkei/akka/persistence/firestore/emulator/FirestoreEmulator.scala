@@ -29,8 +29,7 @@ object FirestoreEmulator {
     FixedHostPortGenericContainer(
       imageName = "ridedott/firestore-emulator:1.11.12",
       exposedHostPort = port,
-      exposedContainerPort = 8080,
-      waitStrategy = Wait.forHttp("/")
+      exposedContainerPort = 8080
     )
   }
 
