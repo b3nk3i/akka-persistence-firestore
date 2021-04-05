@@ -12,6 +12,7 @@ class FireStoreEmulatorProvider(system: ActorSystem) extends FireStoreProvider {
     val emulatorConfig = FirestoreEmulatorConfig.load(system.settings.config)
 
     FirestoreOptions.newBuilder
+      .setProjectId("project-id")
       .setEmulatorHost(s"${emulatorConfig.host}:${emulatorConfig.port}")
       .setCredentialsProvider(FixedCredentialsProvider.create(new FirestoreOptions.EmulatorCredentials))
       .build()
