@@ -1,4 +1,3 @@
-import Config.IT
 import sbt._
 
 object Dependencies {
