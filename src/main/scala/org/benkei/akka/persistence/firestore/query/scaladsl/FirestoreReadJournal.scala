@@ -156,8 +156,10 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     Source.unfoldAsync(offset) { from =>
       retrieveNextBatch(from)
         .flatMap {
-          case Some((s, e)) => Future.successful(Some((s, ())))
-          case None         => akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(retrieveNextBatch(from))
+          case Some((s, _)) =>
+          Future.successful(Some((s, ())))
+          case None =>
+            akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(Future.successful(Some((from, ()))))
         }
     }
   }

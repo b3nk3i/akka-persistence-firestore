@@ -5,7 +5,7 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import cats.implicits.toFunctorOps
 import com.fasterxml.uuid.Generators
-import com.google.cloud.firestore.{DocumentSnapshot, Firestore}
+import com.google.cloud.firestore.{DocumentSnapshot, FieldValue, Firestore, Query}
 import org.benkei.akka.persistence.firestore.data.Document.Document
 import org.benkei.akka.persistence.firestore.data.Field
 import org.benkei.akka.persistence.firestore.journal.FireStoreDao.{EventJournal, asFirestoreRepr}
@@ -24,14 +24,14 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
 
   def write(events: Seq[FirestorePersistentRepr]): Future[Unit] = {
 
-    // since events are persisted atomically, the batch gets the same timestamp
-    val now = System.currentTimeMillis()
-
     val batch = db.batch()
 
     events.foreach { event =>
       val metaData: Document =
-        Map(Field.Ordering.name -> Generators.timeBasedGenerator().generate().toString, Field.Timestamp.name -> now)
+        Map(
+          Field.Ordering.name  -> Generators.timeBasedGenerator().generate().toString,
+          Field.Timestamp.name -> FieldValue.serverTimestamp()
+        )
 
       batch.create(
         db.collection(rootCollection)
@@ -50,7 +50,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
       .document(persistenceId)
       .collection(EventJournal)
       .whereLessThanOrEqualTo(Field.Sequence.name, toSequenceNr)
-      .orderBy(Field.Sequence.name)
+      .orderBy(Field.Sequence.name, Query.Direction.ASCENDING)
       .toStream(queueSize, enqueueTimeout)
       .mapAsyncUnordered(parallelism)(event => event.getReference.update("deleted", true).futureLift)
       .run()
@@ -71,7 +71,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
       .document(persistenceId)
       .collection(EventJournal)
       .whereGreaterThanOrEqualTo(Field.Sequence.name, fromSequenceNr)
-      .orderBy(Field.Sequence.name)
+      .orderBy(Field.Sequence.name, Query.Direction.ASCENDING)
       .toStream(queueSize, enqueueTimeout)
       .map(_.getId.toLong)
       .runFold(fromSequenceNr)(math.max)
@@ -93,7 +93,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
       .collection(EventJournal)
       .whereGreaterThanOrEqualTo(Field.Sequence.name, fromSequenceNr)
       .whereLessThanOrEqualTo(Field.Sequence.name, toSequenceNr)
-      .orderBy(Field.Sequence.name)
+      .orderBy(Field.Sequence.name, Query.Direction.ASCENDING)
       .toStream(queueSize, enqueueTimeout)
       .mapAsync(parallelism)(event => asFirestoreRepr(persistenceId, event))
   }
@@ -102,7 +102,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
     db.collectionGroup(EventJournal)
       .whereGreaterThan(Field.Ordering.name, offset)
       .whereArrayContains(Field.Tags.name, tag)
-      .orderBy(Field.Ordering.name)
+      .orderBy(Field.Ordering.name, Query.Direction.ASCENDING)
       .toStream(queueSize, enqueueTimeout)
       .mapAsync(parallelism)(event => asFirestoreRepr(event.getReference.getParent.getParent.getId, event))
   }

@@ -16,7 +16,7 @@ object Field {
   case object Deleted       extends Field[Boolean] { val name = "deleted" }
   case object WriterUUID    extends Field[String] { val name = "writer-uuid" }
   case object SerializerID  extends Field[Long] { val name = "serializer-id" }
-  case object Timestamp     extends Field[Long] { val name = "timestamp" }
+  case object Timestamp     extends Field[com.google.cloud.Timestamp] { val name = "timestamp" }
   case object Tags          extends Field[java.util.List[String]] { val name = "tags" }
 
 }

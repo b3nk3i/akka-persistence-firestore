@@ -37,7 +37,7 @@ object FirestoreSerializer {
         for {
           sequence      <- data.read(Field.Sequence)
           persistenceId <- data.read(Field.PersistenceID)
-          timestamp     <- data.read(Field.Timestamp)
+          timestamp     <- timestamp(fpr)
           deleted       <- data.read(Field.Deleted)
           writerUUID    <- data.read(Field.WriterUUID)
           manifest      <- data.read(Field.Manifest)
@@ -66,7 +66,7 @@ object FirestoreSerializer {
               updatedPr.persistenceId.write(Field.PersistenceID) ++
               updatedPr.sequenceNr.write(Field.Sequence) ++
               updatedPr.writerUuid.write(Field.WriterUUID) ++
-              updatedPr.timestamp.write(Field.Timestamp) ++
+              com.google.cloud.Timestamp.of(new java.sql.Timestamp(updatedPr.timestamp)).write(Field.Timestamp) ++
               serTags.asJava.write(Field.Tags) ++ serPayload
 
           FirestorePersistentRepr(updatedPr.persistenceId, updatedPr.sequenceNr, data)
@@ -79,7 +79,7 @@ object FirestoreSerializer {
       }
 
       override def timestamp(fpr: FirestorePersistentRepr): Try[Long] = {
-        fpr.data.read(Field.Timestamp)
+        fpr.data.read(Field.Timestamp).map(_.toSqlTimestamp.getTime)
       }
     }
 }
