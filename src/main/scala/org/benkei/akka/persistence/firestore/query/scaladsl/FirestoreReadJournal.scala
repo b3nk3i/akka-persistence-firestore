@@ -12,17 +12,17 @@ import com.google.cloud.firestore.Firestore
 import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.{FirestoreJournalConfig, FirestoreReadJournalConfig}
+import org.benkei.akka.persistence.firestore.internal.{TimeBasedUUIDSerialization, TimeBasedUUIDs, UUIDTimestamp}
 import org.benkei.akka.persistence.firestore.journal.{FireStoreDao, FirestorePersistentRepr}
+import org.benkei.akka.persistence.firestore.query.scaladsl.FirestoreReadJournal.until
 import org.benkei.akka.persistence.firestore.serialization.FirestoreSerializer
 import org.benkei.akka.persistence.firestore.serialization.extention.FirestorePayloadSerializerExtension
 
+import java.util.UUID
 import scala.collection.immutable.Set
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContextExecutor, Future}
-
-object FirestoreReadJournal {
-  final val Identifier = "firestore-read-journal"
-}
+import scala.math.abs
 
 class FirestoreReadJournal(config: Config, configPath: String)(implicit val system: ActorSystem)
     extends ReadJournal
@@ -108,11 +108,26 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
   }
 
   override def currentEventsByTag(tag: String, offset: Offset): Source[EventEnvelope, NotUsed] = {
+
+    // Upper bound offset is delayed by eventualConsistencyDelay ms
+    val to = until(readJournalConfig)
+
     val events =
       offset match {
-        case NoOffset            => dao.eventsByTag(tag, "")
-        case TimeBasedUUID(uuid) => dao.eventsByTag(tag, uuid.toString)
-        case _                   => ???
+        case NoOffset =>
+          dao.eventsByTag(
+            tag,
+            TimeBasedUUIDSerialization.toSortableString(TimeBasedUUIDs.MinUUID),
+            TimeBasedUUIDSerialization.toSortableString(to)
+          )
+        case TimeBasedUUID(uuid) =>
+          dao.eventsByTag(
+            tag,
+            TimeBasedUUIDSerialization.toSortableString(uuid),
+            TimeBasedUUIDSerialization.toSortableString(to)
+          )
+        case _ =>
+          Source.failed(new IllegalArgumentException(s"Unsupported  ${offset} type."))
       }
 
     events
@@ -157,7 +172,7 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
       retrieveNextBatch(from)
         .flatMap {
           case Some((s, _)) =>
-          Future.successful(Some((s, ())))
+            Future.successful(Some((s, ())))
           case None =>
             akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(Future.successful(Some((from, ()))))
         }
@@ -268,5 +283,15 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
             akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(Future.successful(Some((from, ()))))
         }
     }
+  }
+}
+
+object FirestoreReadJournal {
+  final val Identifier = "firestore-read-journal"
+
+  def until(readJournalConfig: FirestoreReadJournalConfig): UUID = {
+    val up = System.currentTimeMillis() - abs(readJournalConfig.eventualConsistencyDelay.toMillis)
+
+    TimeBasedUUIDs.create(UUIDTimestamp.fromUnixTimestamp(up), TimeBasedUUIDs.MinLSB)
   }
 }

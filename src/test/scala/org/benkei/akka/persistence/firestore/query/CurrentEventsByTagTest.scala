@@ -3,8 +3,8 @@ package org.benkei.akka.persistence.firestore.query
 import akka.pattern.ask
 import akka.persistence.query.{EventEnvelope, NoOffset, Offset}
 import akka.stream.scaladsl.Source
-import com.fasterxml.uuid.Generators
-import com.typesafe.config.{ConfigFactory, ConfigValue, ConfigValueFactory}
+import com.typesafe.config.{ConfigValue, ConfigValueFactory}
+import org.benkei.akka.persistence.firestore.internal.{TimeBasedUUIDs, UUIDTimestamp}
 import org.benkei.akka.persistence.firestore.query.CurrentEventsByTagTest._
 import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{Event, TaggedAsyncEvent}
 
@@ -16,8 +16,9 @@ object CurrentEventsByTagTest {
   val refreshInterval: FiniteDuration = 500.milliseconds
 
   val configOverrides: Map[String, ConfigValue] = Map(
-    "jdbc-read-journal.max-buffer-size"  -> ConfigValueFactory.fromAnyRef(maxBufferSize.toString),
-    "jdbc-read-journal.refresh-interval" -> ConfigValueFactory.fromAnyRef(refreshInterval.toString())
+    "firestore-read-journal.max-buffer-size"                 -> ConfigValueFactory.fromAnyRef(maxBufferSize.toString),
+    "firestore-read-journal.refresh-interval"                -> ConfigValueFactory.fromAnyRef(refreshInterval.toString),
+    "firestore-read-journal.eventual-consistency-delay" -> ConfigValueFactory.fromAnyRef("0s")
   )
 }
 
@@ -43,7 +44,7 @@ abstract class CurrentEventsByTagTest extends QueryTestSpec {
   }
 
   it should "find all events by tag" in withActorSystem(config, configOverrides) { implicit system =>
-    val offset0: Offset = Offset.timeBasedUUID(Generators.timeBasedGenerator().generate())
+    val offset0: Offset = Offset.timeBasedUUID(TimeBasedUUIDs.create(UUIDTimestamp.now(), TimeBasedUUIDs.MinLSB))
 
     val journalOps = new ScalaFirestoreReadJournalOperations(system)
     withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
@@ -169,92 +170,91 @@ abstract class CurrentEventsByTagTest extends QueryTestSpec {
       }
   }
 
-  it should "complete without any gaps in sequences when events are being persisted while the query is executed" in withActorSystem(
-    ConfigFactory.load(config)
-  ) { implicit system =>
-    val journalOps = new JavaDslJdbcReadJournalOperations(system)
-    withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
-      def sendMessagesWithTag(tag: String, numberOfMessagesPerActor: Int) = {
+  it should "complete without any gaps in sequences when events are being persisted while the query is executed" in
+    withActorSystem(config, configOverrides) { implicit system =>
+      val journalOps = new JavaDslFirestoreReadJournalOperations(system)
+      withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
+        def sendMessagesWithTag(tag: String, numberOfMessagesPerActor: Int) = {
 
-        val actors = Seq(actor1, actor2, actor3)
+          val actors = Seq(actor1, actor2, actor3)
 
-        Source
-          .fromIterator(() => (1 to numberOfMessagesPerActor).iterator)
-          .flatMapConcat { i =>
-            Source
-              .fromIterator(() => actors.iterator.map((_, i)))
-          }
-          .mapAsync(actors.size) {
-            case (actor, i) =>
-              actor ? TaggedAsyncEvent(Event(i.toString), tag)
-          }
-      }
-
-      val tag = "someTag"
-
-      // send a batch of 3 * 200
-      val batch1Size = 90
-      val batch2Size = 300
-
-      val batch1 = sendMessagesWithTag(tag, batch1Size / 3).run()
-
-      // Try to persist a large batch of events per actor. Some of these may be returned, but not all!
-      // Reduced for 5.0.0 as we can no longer do a batch insert due to the insert returning the ordering
-      // so trying to persist 1000s in a batch is slower
-      val batch2 = sendMessagesWithTag(tag, batch2Size / 3).run()
-
-      batch1.futureValue
-
-      // Sanity check, all events in the first batch must be in the journal
-      journalOps.countJournal.futureValue should be >= batch1Size.toLong
-
-      var batch2Offset: Offset = NoOffset
-
-      // start a query before 2nd stream completes without Offset
-      journalOps.withCurrentEventsByTag()(tag, NoOffset) { tp =>
-        // The stream must complete within the given amount of time
-        // This make take a while in case the journal sequence actor detects gaps
-        val allEvents = tp.toStrict(atMost = 20.seconds)
-        allEvents.size should be >= batch1Size
-
-        batch2Offset = allEvents(batch1Size - 1).offset
-
-        val zero: Map[String, Long] = Map("my-1" -> 0L, "my-2" -> 0L, "my-3" -> 0L)
-
-        val stateBatch1 = allEvents.foldLeft(zero) {
-          case (acc, EventEnvelope(_, pID, sequence, _)) =>
-            acc(pID) + 1 shouldBe sequence
-            acc + (pID -> sequence)
+          Source
+            .fromIterator(() => (1 to numberOfMessagesPerActor).iterator)
+            .flatMapConcat { i =>
+              Source
+                .fromIterator(() => actors.iterator.map((_, i)))
+            }
+            .mapAsync(actors.size) {
+              case (actor, i) =>
+                actor ? TaggedAsyncEvent(Event(i.toString), tag)
+            }
         }
-        stateBatch1("my-1") should be >= (batch1Size / 3).toLong
-        stateBatch1("my-2") should be >= (batch1Size / 3).toLong
-        stateBatch1("my-3") should be >= (batch1Size / 3).toLong
-      }
 
-      // start a 2nd query before 2nd stream completes with Offset on last batch1
-      journalOps.withCurrentEventsByTag()(tag, batch2Offset) { tp =>
-        val batch2Events = tp.toStrict(atMost = 20.seconds)
+        val tag = "someTag"
 
-        // state of each persistence id before 2nd query
-        val state =
-          batch2Events.collectFirst {
-            case EventEnvelope(_, "my-1", sequence, _) => Map("my-1" -> (sequence - 1L))
-          }.head ++
+        // send a batch of 3 * 200
+        val batch1Size = 90
+        val batch2Size = 300
+
+        val batch1 = sendMessagesWithTag(tag, batch1Size / 3).run()
+
+        // Try to persist a large batch of events per actor. Some of these may be returned, but not all!
+        // Reduced for 5.0.0 as we can no longer do a batch insert due to the insert returning the ordering
+        // so trying to persist 1000s in a batch is slower
+        val batch2 = sendMessagesWithTag(tag, batch2Size / 3).run()
+
+        batch1.futureValue
+
+        // Sanity check, all events in the first batch must be in the journal
+        journalOps.countJournal.futureValue should be >= batch1Size.toLong
+
+        var batch2Offset: Offset = NoOffset
+
+        // start a query before 2nd stream completes without Offset
+        journalOps.withCurrentEventsByTag()(tag, NoOffset) { tp =>
+          // The stream must complete within the given amount of time
+          // This make take a while in case the journal sequence actor detects gaps
+          val allEvents = tp.toStrict(atMost = 20.seconds)
+          allEvents.size should be >= batch1Size
+
+          batch2Offset = allEvents(batch1Size - 1).offset
+
+          val zero: Map[String, Long] = Map("my-1" -> 0L, "my-2" -> 0L, "my-3" -> 0L)
+
+          val stateBatch1 = allEvents.foldLeft(zero) {
+            case (acc, EventEnvelope(_, pID, sequence, _)) =>
+              acc(pID) + 1 shouldBe sequence
+              acc + (pID -> sequence)
+          }
+          stateBatch1("my-1") should be >= (batch1Size / 3).toLong
+          stateBatch1("my-2") should be >= (batch1Size / 3).toLong
+          stateBatch1("my-3") should be >= (batch1Size / 3).toLong
+        }
+
+        // start a 2nd query before 2nd stream completes with Offset on last batch1
+        journalOps.withCurrentEventsByTag()(tag, batch2Offset) { tp =>
+          val batch2Events = tp.toStrict(atMost = 20.seconds)
+
+          // state of each persistence id before 2nd query
+          val state =
             batch2Events.collectFirst {
-              case EventEnvelope(_, "my-2", sequence, _) => Map("my-2" -> (sequence - 1L))
+              case EventEnvelope(_, "my-1", sequence, _) => Map("my-1" -> (sequence - 1L))
             }.head ++
-            batch2Events.collectFirst {
-              case EventEnvelope(_, "my-3", sequence, _) => Map("my-3" -> (sequence - 1L))
-            }.head
+              batch2Events.collectFirst {
+                case EventEnvelope(_, "my-2", sequence, _) => Map("my-2" -> (sequence - 1L))
+              }.head ++
+              batch2Events.collectFirst {
+                case EventEnvelope(_, "my-3", sequence, _) => Map("my-3" -> (sequence - 1L))
+              }.head
 
-        val stateBatch2 = batch2Events.foldLeft(state) {
-          case (acc, EventEnvelope(_, pID, sequence, _)) =>
-            acc(pID) + 1 shouldBe sequence
-            acc + (pID -> sequence)
+          val stateBatch2 = batch2Events.foldLeft(state) {
+            case (acc, EventEnvelope(_, pID, sequence, _)) =>
+              acc(pID) + 1 shouldBe sequence
+              acc + (pID -> sequence)
+          }
+
+          stateBatch2.values.sum shouldBe batch1Size + batch2Events.size
         }
-
-        stateBatch2.values.sum shouldBe batch1Size + batch2Events.size
       }
     }
-  }
 }

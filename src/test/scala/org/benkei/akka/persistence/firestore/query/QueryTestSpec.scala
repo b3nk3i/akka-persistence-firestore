@@ -10,7 +10,7 @@ import akka.stream.testkit.TestSubscriber
 import akka.stream.testkit.javadsl.{TestSink => JavaSink}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.stream.{Materializer, SystemMaterializer}
-import com.typesafe.config.{Config, ConfigValue}
+import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.SimpleSpec
 import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{Event, TaggedAsyncEvent, TaggedEvent}
 import org.benkei.akka.persistence.firestore.query.javadsl.{FirestoreReadJournal => JavaFirestoreReadJournal}
@@ -119,9 +119,9 @@ class ScalaFirestoreReadJournalOperations(readJournal: FirestoreReadJournal)(imp
       .map(_.sum)
 }
 
-class JavaDslJdbcReadJournalOperations(readJournal: javadsl.FirestoreReadJournal)(implicit
-  system:                                           ActorSystem,
-  mat:                                              Materializer
+class JavaDslFirestoreReadJournalOperations(readJournal: javadsl.FirestoreReadJournal)(implicit
+  system:                                                ActorSystem,
+  mat:                                                   Materializer
 ) extends ReadJournalOperations {
   def this(system: ActorSystem) =
     this(

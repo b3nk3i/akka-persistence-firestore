@@ -2,15 +2,24 @@ package org.benkei.akka.persistence.firestore.query
 
 import akka.pattern._
 import akka.persistence.query.{EventEnvelope, NoOffset}
+import com.typesafe.config.{ConfigValue, ConfigValueFactory}
+import org.benkei.akka.persistence.firestore.query.LogicalDeleteQueryTest.configOverrides
 
 import scala.concurrent.duration._
 
+object LogicalDeleteQueryTest {
+
+  val configOverrides: Map[String, ConfigValue] = Map(
+    "firestore-read-journal.eventual-consistency-delay" -> ConfigValueFactory.fromAnyRef("0s")
+  )
+}
+
 abstract class LogicalDeleteQueryTest extends QueryTestSpec {
 
-  implicit val askTimeout = 500.millis
+  implicit val askTimeout: FiniteDuration = 500.millis
 
   it should "return logically deleted events when using CurrentEventsByTag (backward compatibility)" in
-    withActorSystem(config) { implicit system =>
+    withActorSystem(config, configOverrides) { implicit system =>
       val journalOps = new ScalaFirestoreReadJournalOperations(system)
       withTestActors(replyToMessages = true) { (actor1, _, _) =>
         (actor1 ? withTags(1, "number")).futureValue
@@ -31,7 +40,7 @@ abstract class LogicalDeleteQueryTest extends QueryTestSpec {
     }
 
   it should "return logically deleted events when using EventsByTag (backward compatibility)" in
-    withActorSystem(config) { implicit system =>
+    withActorSystem(config, configOverrides) { implicit system =>
       val journalOps = new ScalaFirestoreReadJournalOperations(system)
       withTestActors(replyToMessages = true) { (actor1, _, _) =>
         (actor1 ? withTags(1, "number")).futureValue
@@ -52,7 +61,7 @@ abstract class LogicalDeleteQueryTest extends QueryTestSpec {
     }
 
   it should "return logically deleted events when using CurrentEventsByPersistenceId (backward compatibility)" in
-    withActorSystem(config) { implicit system =>
+    withActorSystem(config, configOverrides) { implicit system =>
       val journalOps = new ScalaFirestoreReadJournalOperations(system)
       withTestActors(replyToMessages = true) { (actor1, _, _) =>
         (actor1 ? withTags(1, "number")).futureValue
@@ -73,7 +82,7 @@ abstract class LogicalDeleteQueryTest extends QueryTestSpec {
     }
 
   it should "return logically deleted events when using EventsByPersistenceId (backward compatibility)" in
-    withActorSystem(config) { implicit system =>
+    withActorSystem(config, configOverrides) { implicit system =>
       val journalOps = new ScalaFirestoreReadJournalOperations(system)
       withTestActors(replyToMessages = true) { (actor1, _, _) =>
         (actor1 ? withTags(1, "number")).futureValue

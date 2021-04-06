@@ -4,10 +4,10 @@ import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import cats.implicits.toFunctorOps
-import com.fasterxml.uuid.Generators
 import com.google.cloud.firestore.{DocumentSnapshot, FieldValue, Firestore, Query}
 import org.benkei.akka.persistence.firestore.data.Document.Document
 import org.benkei.akka.persistence.firestore.data.Field
+import org.benkei.akka.persistence.firestore.internal.{TimeBasedUUIDSerialization, UUIDGenerator}
 import org.benkei.akka.persistence.firestore.journal.FireStoreDao.{EventJournal, asFirestoreRepr}
 import org.benkei.google.ApiFuturesOps.ApiFutureExt
 import org.benkei.google.FirestoreStreamingOps.StreamQueryOps
@@ -22,6 +22,8 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   mat: Materializer
 ) {
 
+  private val uuidGenerator = UUIDGenerator()
+
   def write(events: Seq[FirestorePersistentRepr]): Future[Unit] = {
 
     val batch = db.batch()
@@ -29,7 +31,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
     events.foreach { event =>
       val metaData: Document =
         Map(
-          Field.Ordering.name  -> Generators.timeBasedGenerator().generate().toString,
+          Field.Ordering.name  -> TimeBasedUUIDSerialization.toSortableString(uuidGenerator.nextUuid()),
           Field.Timestamp.name -> FieldValue.serverTimestamp()
         )
 
@@ -98,9 +100,11 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
       .mapAsync(parallelism)(event => asFirestoreRepr(persistenceId, event))
   }
 
-  def eventsByTag(tag: String, offset: String): Source[FirestorePersistentRepr, NotUsed] = {
+  def eventsByTag(tag: String, offset: String, to: String): Source[FirestorePersistentRepr, NotUsed] = {
+
     db.collectionGroup(EventJournal)
       .whereGreaterThan(Field.Ordering.name, offset)
+      .whereLessThan(Field.Ordering.name, to)
       .whereArrayContains(Field.Tags.name, tag)
       .orderBy(Field.Ordering.name, Query.Direction.ASCENDING)
       .toStream(queueSize, enqueueTimeout)

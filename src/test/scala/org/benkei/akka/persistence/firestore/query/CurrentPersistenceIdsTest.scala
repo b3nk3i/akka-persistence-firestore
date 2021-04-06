@@ -11,7 +11,7 @@ abstract class CurrentPersistenceIdsTest extends QueryTestSpec {
   }
 
   it should "find persistenceIds for actors" in withActorSystem(config) { implicit system =>
-    val journalOps = new JavaDslJdbcReadJournalOperations(system)
+    val journalOps = new JavaDslFirestoreReadJournalOperations(system)
     withTestActors() { (actor1, actor2, actor3) =>
       actor1 ! 1
       actor2 ! 1

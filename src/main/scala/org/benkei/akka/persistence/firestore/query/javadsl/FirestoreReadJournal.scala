@@ -4,13 +4,13 @@ import akka.NotUsed
 import akka.persistence.query.javadsl._
 import akka.persistence.query.{EventEnvelope, Offset}
 import akka.stream.javadsl.Source
-import org.benkei.akka.persistence.firestore.query.scaladsl.{FirestoreReadJournal => ScalaJdbcReadJournal}
+import org.benkei.akka.persistence.firestore.query.scaladsl.{FirestoreReadJournal => ScalaFirestoreReadJournal}
 
 object FirestoreReadJournal {
-  final val Identifier = ScalaJdbcReadJournal.Identifier
+  final val Identifier = ScalaFirestoreReadJournal.Identifier
 }
 
-class FirestoreReadJournal(journal: ScalaJdbcReadJournal)
+class FirestoreReadJournal(journal: ScalaFirestoreReadJournal)
     extends ReadJournal
     with CurrentPersistenceIdsQuery
     with PersistenceIdsQuery
@@ -105,10 +105,10 @@ class FirestoreReadJournal(journal: ScalaJdbcReadJournal)
     * The offset is exclusive, i.e. the event corresponding to the given `offset` parameter is not
     * included in the stream.
     *
-   * For akka-persistence-jdbc the `offset` corresponds to the `ordering` column in the Journal table.
-    * The `ordering` is a sequential id number that uniquely identifies the position of each event within
-    * the event stream. The `Offset` type is `akka.persistence.query.Sequence` with the `ordering` as the
-    * offset value.
+   * For akka-persistence-firestore the `offset` corresponds to the `ordering` column in the Journal document.
+    * The `ordering` is a time based UUID string that uniquely identifies the position of each event within
+    * the event stream. The `Offset` type is `akka.persistence.query.TimeBasedUUID` with the `ordering` as the
+    * offset string value.
     *
    * The returned event stream is ordered by `offset`.
     *

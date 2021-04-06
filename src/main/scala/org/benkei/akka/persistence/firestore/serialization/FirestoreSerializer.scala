@@ -6,6 +6,7 @@ import akka.persistence.journal.Tagged
 import akka.persistence.query.Offset
 import org.benkei.akka.persistence.firestore.data.Document._
 import org.benkei.akka.persistence.firestore.data.Field
+import org.benkei.akka.persistence.firestore.internal.TimeBasedUUIDSerialization
 import org.benkei.akka.persistence.firestore.journal.FirestorePersistentRepr
 
 import java.util.UUID
@@ -75,7 +76,7 @@ object FirestoreSerializer {
       }
 
       override def ordering(fpr: FirestorePersistentRepr): Try[Offset] = {
-        fpr.data.read(Field.Ordering).map(UUID.fromString).map(Offset.timeBasedUUID)
+        fpr.data.read(Field.Ordering).map(TimeBasedUUIDSerialization.fromSortableString).map(Offset.timeBasedUUID)
       }
 
       override def timestamp(fpr: FirestorePersistentRepr): Try[Long] = {

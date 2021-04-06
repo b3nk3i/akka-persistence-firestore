@@ -3,17 +3,25 @@ package org.benkei.akka.persistence.firestore.query
 import akka.Done
 import akka.pattern.ask
 import akka.persistence.query.{EventEnvelope, TimeBasedUUID}
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigFactory, ConfigValue, ConfigValueFactory}
 import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{Event, TaggedAsyncEvent}
+import org.benkei.akka.persistence.firestore.query.EventsByPersistenceIdTest.configOverrides
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
+object EventsByPersistenceIdTest {
+
+  val configOverrides: Map[String, ConfigValue] = Map(
+    "firestore-read-journal.eventual-consistency-delay" -> ConfigValueFactory.fromAnyRef("0s")
+  )
+}
+
 abstract class EventsByPersistenceIdTest extends QueryTestSpec {
   import QueryTestSpec.EventEnvelopeProbeOps
 
-  it should "not find any events for unknown pid" in withActorSystem(config) { implicit system =>
+  it should "not find any events for unknown pid" in withActorSystem(config, configOverrides) { implicit system =>
     val journalOps = new ScalaFirestoreReadJournalOperations(system)
     journalOps.withEventsByPersistenceId()("unkown-pid", 0L, Long.MaxValue) { tp =>
       tp.request(1)
@@ -23,7 +31,7 @@ abstract class EventsByPersistenceIdTest extends QueryTestSpec {
     }
   }
 
-  it should "find events from sequenceNr" in withActorSystem(config) { implicit system =>
+  it should "find events from sequenceNr" in withActorSystem(config, configOverrides) { implicit system =>
     val journalOps = new ScalaFirestoreReadJournalOperations(system)
     withTestActors() { (actor1, _, _) =>
       actor1 ! withTags(1, "number")
@@ -119,7 +127,7 @@ abstract class EventsByPersistenceIdTest extends QueryTestSpec {
     }
   }
 
-  it should "include ordering Offset in EventEnvelope" in withActorSystem(config) { implicit system =>
+  it should "include ordering Offset in EventEnvelope" in withActorSystem(config, configOverrides) { implicit system =>
     val journalOps = new ScalaFirestoreReadJournalOperations(system)
     withTestActors() { (actor1, actor2, actor3) =>
       actor1 ! withTags(1, "ordering")
@@ -163,55 +171,56 @@ abstract class EventsByPersistenceIdTest extends QueryTestSpec {
     }
   }
 
-  it should "deliver EventEnvelopes non-zero timestamps" in withActorSystem(config) { implicit system =>
-    val journalOps = new ScalaFirestoreReadJournalOperations(system)
-    withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
-      val testStartTime = System.currentTimeMillis()
+  it should "deliver EventEnvelopes non-zero timestamps" in withActorSystem(config, configOverrides) {
+    implicit system =>
+      val journalOps = new ScalaFirestoreReadJournalOperations(system)
+      withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
+        val testStartTime = System.currentTimeMillis()
 
-      (actor1 ? withTags(1, "number")).futureValue
-      (actor2 ? withTags(2, "number")).futureValue
-      (actor3 ? withTags(3, "number")).futureValue
+        (actor1 ? withTags(1, "number")).futureValue
+        (actor2 ? withTags(2, "number")).futureValue
+        (actor3 ? withTags(3, "number")).futureValue
 
-      def assertTimestamp(timestamp: Long, clue: String) = {
-        withClue(clue) {
-          timestamp should !==(0L)
-          // we want to prove that the event got a non-zero timestamp
-          // but also a timestamp that between some boundaries around this test run
-          (timestamp - testStartTime) should be < 120000L
-          (timestamp - testStartTime) should be > 0L
+        def assertTimestamp(timestamp: Long, clue: String) = {
+          withClue(clue) {
+            timestamp should !==(0L)
+            // we want to prove that the event got a non-zero timestamp
+            // but also a timestamp that between some boundaries around this test run
+            (timestamp - testStartTime) should be < 120000L
+            (timestamp - testStartTime) should be > 0L
+          }
+        }
+
+        journalOps.withEventsByPersistenceId()("my-1", 0, 1) { tp =>
+          tp.request(Int.MaxValue)
+          tp.expectNextPF {
+            case ev @ EventEnvelope(_, "my-1", 1, 1) =>
+              assertTimestamp(ev.timestamp, "my-1")
+          }
+          tp.cancel()
+        }
+
+        journalOps.withEventsByPersistenceId()("my-2", 0, 1) { tp =>
+          tp.request(Int.MaxValue)
+          tp.expectNextPF {
+            case ev @ EventEnvelope(_, "my-2", 1, 2) =>
+              assertTimestamp(ev.timestamp, "my-2")
+          }
+          tp.cancel()
+        }
+
+        journalOps.withEventsByPersistenceId()("my-3", 0, 1) { tp =>
+          tp.request(Int.MaxValue)
+          tp.expectNextPF {
+            case ev @ EventEnvelope(_, "my-3", 1, 3) =>
+              assertTimestamp(ev.timestamp, "my-3")
+          }
+          tp.cancel()
         }
       }
-
-      journalOps.withEventsByPersistenceId()("my-1", 0, 1) { tp =>
-        tp.request(Int.MaxValue)
-        tp.expectNextPF {
-          case ev @ EventEnvelope(_, "my-1", 1, 1) =>
-            assertTimestamp(ev.timestamp, "my-1")
-        }
-        tp.cancel()
-      }
-
-      journalOps.withEventsByPersistenceId()("my-2", 0, 1) { tp =>
-        tp.request(Int.MaxValue)
-        tp.expectNextPF {
-          case ev @ EventEnvelope(_, "my-2", 1, 2) =>
-            assertTimestamp(ev.timestamp, "my-2")
-        }
-        tp.cancel()
-      }
-
-      journalOps.withEventsByPersistenceId()("my-3", 0, 1) { tp =>
-        tp.request(Int.MaxValue)
-        tp.expectNextPF {
-          case ev @ EventEnvelope(_, "my-3", 1, 3) =>
-            assertTimestamp(ev.timestamp, "my-3")
-        }
-        tp.cancel()
-      }
-    }
   }
 
-  it should "find events for actor with pid 'my-1'" in withActorSystem(config) { implicit system =>
+  it should "find events for actor with pid 'my-1'" in withActorSystem(config, configOverrides) { implicit system =>
     val journalOps = new ScalaFirestoreReadJournalOperations(system)
     withTestActors() { (actor1, _, _) =>
       journalOps.withEventsByPersistenceId()("my-1", 0) { tp =>
@@ -233,7 +242,7 @@ abstract class EventsByPersistenceIdTest extends QueryTestSpec {
   it should "find events for actor with pid 'my-1' and persisting messages to other actor" in withActorSystem(
     ConfigFactory.load(config)
   ) { implicit system =>
-    val journalOps = new JavaDslJdbcReadJournalOperations(system)
+    val journalOps = new JavaDslFirestoreReadJournalOperations(system)
     withTestActors() { (actor1, actor2, _) =>
       journalOps.withEventsByPersistenceId()("my-1", 0, Long.MaxValue) { tp =>
         tp.request(10)
@@ -262,8 +271,8 @@ abstract class EventsByPersistenceIdTest extends QueryTestSpec {
     }
   }
 
-  it should "find events for actor with pid 'my-2'" in withActorSystem(config) { implicit system =>
-    val journalOps = new JavaDslJdbcReadJournalOperations(system)
+  it should "find events for actor with pid 'my-2'" in withActorSystem(config, configOverrides) { implicit system =>
+    val journalOps = new JavaDslFirestoreReadJournalOperations(system)
     withTestActors() { (_, actor2, _) =>
       actor2 ! 1
       actor2 ! 2
@@ -302,9 +311,9 @@ abstract class EventsByPersistenceIdTest extends QueryTestSpec {
     }
   }
 
-  it should "find a large number of events quickly" in withActorSystem(config) { implicit system =>
+  it should "find a large number of events quickly" in withActorSystem(config, configOverrides) { implicit system =>
     import akka.pattern.ask
-    val journalOps = new JavaDslJdbcReadJournalOperations(system)
+    val journalOps = new JavaDslFirestoreReadJournalOperations(system)
     withTestActors(replyToMessages = true) { (actor1, _, _) =>
       def sendMessagesWithTag(tag: String, numberOfMessages: Int): Future[Done] = {
         val futures = for (i <- 1 to numberOfMessages) yield {

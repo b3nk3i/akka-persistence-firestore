@@ -18,9 +18,8 @@ object Dependencies {
   }
 
   object Libraries {
-    val Cats      = "org.typelevel"     %% "cats-core"              % Versions.Cats
-    val Firestore = "com.google.cloud"   % "google-cloud-firestore" % Versions.Firestore
-    val UUID      = "com.fasterxml.uuid" % "java-uuid-generator"    % Versions.UUID
+    val Cats      = "org.typelevel"   %% "cats-core"              % Versions.Cats
+    val Firestore = "com.google.cloud" % "google-cloud-firestore" % Versions.Firestore
 
     val ScalaTest = "org.scalatest" %% "scalatest" % Versions.ScalaTest % Test
     val Logging =
@@ -40,6 +39,6 @@ object Dependencies {
 
     val Docker = List("com.dimafeng" %% "testcontainers-scala-scalatest" % "0.39.3" % Test)
 
-    val All: List[ModuleID] = List(Cats, Firestore, UUID, ScalaTest) ++ Akka ++ Docker ++ Logging
+    val All: List[ModuleID] = List(Cats, Firestore, ScalaTest) ++ Akka ++ Docker ++ Logging
   }
 }

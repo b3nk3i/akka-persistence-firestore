@@ -1,28 +1,29 @@
 package org.benkei.akka.persistence.firestore.query
 
 import akka.pattern.ask
-import akka.persistence.query.{EventEnvelope, NoOffset, Offset, Sequence}
+import akka.persistence.query.{EventEnvelope, NoOffset, Offset}
 import akka.stream.scaladsl.Source
-import com.fasterxml.uuid.Generators
-import com.typesafe.config.{ConfigFactory, ConfigValue, ConfigValueFactory}
-import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{
-  Event,
-  EventRestored,
-  TaggedAsyncEvent,
-  TaggedEvent
-}
-import org.benkei.akka.persistence.firestore.query.EventsByTagTest._
+import com.typesafe.config.{ConfigValue, ConfigValueFactory}
+import org.benkei.akka.persistence.firestore.internal.{TimeBasedUUIDs, UUIDTimestamp}
+import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{Event, EventRestored, TaggedAsyncEvent, TaggedEvent}
+import org.benkei.akka.persistence.firestore.query.EventsByTagTest.{configOverrides, delayOverrides, refreshInterval}
 
 import scala.concurrent.duration._
 
 object EventsByTagTest {
-  val maxBufferSize   = 20
-  val refreshInterval = 500.milliseconds
+  val maxBufferSize = 20
+
+  val refreshInterval: FiniteDuration = 500.milliseconds
 
   val configOverrides: Map[String, ConfigValue] = Map(
-    "jdbc-read-journal.max-buffer-size"  -> ConfigValueFactory.fromAnyRef(maxBufferSize.toString),
-    "jdbc-read-journal.refresh-interval" -> ConfigValueFactory.fromAnyRef(refreshInterval.toString())
+    "firestore-read-journal.max-buffer-size"            -> ConfigValueFactory.fromAnyRef(maxBufferSize.toString),
+    "firestore-read-journal.refresh-interval"           -> ConfigValueFactory.fromAnyRef(refreshInterval.toString),
+    "firestore-read-journal.eventual-consistency-delay" -> ConfigValueFactory.fromAnyRef("0s")
   )
+
+  def delayOverrides: Map[String, ConfigValue] = {
+    configOverrides ++ Map("firestore-read-journal.eventual-consistency-delay" -> ConfigValueFactory.fromAnyRef("2s"))
+  }
 }
 
 abstract class EventsByTagTest extends QueryTestSpec {
@@ -51,7 +52,7 @@ abstract class EventsByTagTest extends QueryTestSpec {
   }
 
   it should "find all events by tag" in withActorSystem(config, configOverrides) { implicit system =>
-    val offset0: Offset = Offset.timeBasedUUID(Generators.timeBasedGenerator().generate())
+    val offset0: Offset = Offset.timeBasedUUID(TimeBasedUUIDs.create(UUIDTimestamp.now(), TimeBasedUUIDs.MinLSB))
 
     val journalOps = new ScalaFirestoreReadJournalOperations(system)
     withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
@@ -129,7 +130,7 @@ abstract class EventsByTagTest extends QueryTestSpec {
   }
 
   it should "deliver EventEnvelopes non-zero timestamps" in withActorSystem(config, configOverrides) {
-    val offset0: Offset = Offset.timeBasedUUID(Generators.timeBasedGenerator().generate())
+    val offset0: Offset = Offset.timeBasedUUID(TimeBasedUUIDs.create(UUIDTimestamp.now(), TimeBasedUUIDs.MinLSB))
 
     implicit system =>
       val journalOps = new ScalaFirestoreReadJournalOperations(system)
@@ -170,7 +171,7 @@ abstract class EventsByTagTest extends QueryTestSpec {
   }
 
   it should "select events by tag with exact match" in withActorSystem(config, configOverrides) { implicit system =>
-    val offset0: Offset = Offset.timeBasedUUID(Generators.timeBasedGenerator().generate())
+    val offset0: Offset = Offset.timeBasedUUID(TimeBasedUUIDs.create(UUIDTimestamp.now(), TimeBasedUUIDs.MinLSB))
 
     var offset1: Offset = NoOffset
     var offset2: Offset = NoOffset
@@ -214,46 +215,49 @@ abstract class EventsByTagTest extends QueryTestSpec {
     }
   }
 
-  it should "find all events by tag even when lots of events are persisted concurrently" in withActorSystem(
-    ConfigFactory.load(config)
-  ) { implicit system =>
-    val journalOps            = new ScalaFirestoreReadJournalOperations(system)
-    val msgCountPerActor      = 20
-    val numberOfActors        = 10
-    val totalNumberOfMessages = msgCountPerActor * numberOfActors
-    withManyTestActors(numberOfActors) { actors =>
-      val actorsWithIndexes = actors.zipWithIndex
-      for {
-        messageNumber     <- 0 until msgCountPerActor
-        (actor, actorIdx) <- actorsWithIndexes
-      } actor ! TaggedEvent(Event(s"$actorIdx-$messageNumber"), "myEvent")
+  /*
+    eventual-consistency-delay is required.
+   */
+  it should "find all events by tag even when lots of events are persisted concurrently" in
+    withActorSystem(config, delayOverrides) { implicit system =>
+      val journalOps            = new ScalaFirestoreReadJournalOperations(system)
+      val msgCountPerActor      = 20
+      val numberOfActors        = 10
+      val totalNumberOfMessages = msgCountPerActor * numberOfActors
+      withManyTestActors(numberOfActors) { actors =>
+        val actorsWithIndexes = actors.zipWithIndex
+        for {
+          messageNumber     <- 0 until msgCountPerActor
+          (actor, actorIdx) <- actorsWithIndexes
+        } actor ! TaggedEvent(Event(s"$actorIdx-$messageNumber"), "myEvent")
 
-      journalOps.withEventsByTag()("myEvent", NoOffset) { tp =>
-        tp.request(Int.MaxValue)
-        (1 to totalNumberOfMessages).foldLeft(Map.empty[Int, Int]) {
-          case (map, idx) =>
-            val eventRestored = tp.expectNext()
-            val mgsParts      = eventRestored.event.asInstanceOf[EventRestored].value.split("-")
-            val actorIdx      = mgsParts(0).toInt
-            val msgNumber     = mgsParts(1).toInt
-            val expectedCount = map.getOrElse(actorIdx, 0)
-            assertResult(expected = expectedCount)(msgNumber)
-            // keep track of the next message number we expect for this actor idx
-            map.updated(actorIdx, msgNumber + 1)
+        journalOps.withEventsByTag()("myEvent", NoOffset) { tp =>
+          tp.request(Int.MaxValue)
+          (1 to totalNumberOfMessages).foldLeft(Map.empty[Int, Int]) {
+            case (map, idx) =>
+              val eventRestored = tp.expectNext()
+              val mgsParts      = eventRestored.event.asInstanceOf[EventRestored].value.split("-")
+              val actorIdx      = mgsParts(0).toInt
+              val msgNumber     = mgsParts(1).toInt
+              val expectedCount = map.getOrElse(actorIdx, 0)
+
+              assertResult(expected = expectedCount)(msgNumber)
+              // keep track of the next message number we expect for this actor idx
+              map.updated(actorIdx, msgNumber + 1)
+          }
+          tp.cancel()
+          tp.expectNoMessage(NoMsgTime)
         }
-        tp.cancel()
-        tp.expectNoMessage(NoMsgTime)
       }
     }
-  }
 
   it should "find events by tag from an offset" in withActorSystem(config, configOverrides) { implicit system =>
-    val offset0: Offset = Offset.timeBasedUUID(Generators.timeBasedGenerator().generate())
+    val offset0: Offset = Offset.timeBasedUUID(TimeBasedUUIDs.create(UUIDTimestamp.now(), TimeBasedUUIDs.MinLSB))
     var offset1: Offset = NoOffset
     var offset2: Offset = NoOffset
     var offset3: Offset = NoOffset
 
-    val journalOps = new JavaDslJdbcReadJournalOperations(system)
+    val journalOps = new JavaDslFirestoreReadJournalOperations(system)
     withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
       (actor1 ? withTags(1, "number")).futureValue
       (actor2 ? withTags(2, "number")).futureValue
@@ -286,7 +290,7 @@ abstract class EventsByTagTest extends QueryTestSpec {
   }
 
   it should "persist and find tagged event for one tag" in withActorSystem(config, configOverrides) { implicit system =>
-    val journalOps = new JavaDslJdbcReadJournalOperations(system)
+    val journalOps = new JavaDslFirestoreReadJournalOperations(system)
     withTestActors() { (actor1, actor2, actor3) =>
       journalOps.withEventsByTag(10.seconds)("one", NoOffset) { tp =>
         tp.request(Int.MaxValue)
@@ -330,82 +334,81 @@ abstract class EventsByTagTest extends QueryTestSpec {
     }
   }
 
-  it should "persist and find tagged events when stored with multiple tags" in withActorSystem(
-    ConfigFactory.load(config)
-  ) { implicit system =>
-    val journalOps = new ScalaFirestoreReadJournalOperations(system)
-    withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
-      (actor1 ? withTags(1, "one", "1", "prime")).futureValue
-      (actor1 ? withTags(2, "two", "2", "prime")).futureValue
-      (actor1 ? withTags(3, "three", "3", "prime")).futureValue
-      (actor1 ? withTags(4, "four", "4")).futureValue
-      (actor1 ? withTags(5, "five", "5", "prime")).futureValue
-      (actor2 ? withTags(3, "three", "3", "prime")).futureValue
-      (actor3 ? withTags(3, "three", "3", "prime")).futureValue
+  it should "persist and find tagged events when stored with multiple tags" in
+    withActorSystem(config, configOverrides) { implicit system =>
+      val journalOps = new ScalaFirestoreReadJournalOperations(system)
+      withTestActors(replyToMessages = true) { (actor1, actor2, actor3) =>
+        (actor1 ? withTags(1, "one", "1", "prime")).futureValue
+        (actor1 ? withTags(2, "two", "2", "prime")).futureValue
+        (actor1 ? withTags(3, "three", "3", "prime")).futureValue
+        (actor1 ? withTags(4, "four", "4")).futureValue
+        (actor1 ? withTags(5, "five", "5", "prime")).futureValue
+        (actor2 ? withTags(3, "three", "3", "prime")).futureValue
+        (actor3 ? withTags(3, "three", "3", "prime")).futureValue
 
-      (actor1 ? 6).futureValue
-      (actor1 ? 7).futureValue
-      (actor1 ? 8).futureValue
-      (actor1 ? 9).futureValue
-      (actor1 ? 10).futureValue
+        (actor1 ? 6).futureValue
+        (actor1 ? 7).futureValue
+        (actor1 ? 8).futureValue
+        (actor1 ? 9).futureValue
+        (actor1 ? 10).futureValue
 
-      eventually {
-        journalOps.countJournal.futureValue shouldBe 12
-      }
+        eventually {
+          journalOps.countJournal.futureValue shouldBe 12
+        }
 
-      journalOps.withEventsByTag(10.seconds)("prime", NoOffset) { tp =>
-        tp.request(Int.MaxValue)
-        tp.expectNextPF { case EventEnvelope(_, "my-1", 1, 1) => }
-        tp.expectNextPF { case EventEnvelope(_, "my-1", 2, 2) => }
-        tp.expectNextPF { case EventEnvelope(_, "my-1", 3, 3) => }
-        tp.expectNextPF { case EventEnvelope(_, "my-1", 5, 5) => }
-        tp.expectNextPF { case EventEnvelope(_, "my-2", 1, 3) => }
-        tp.expectNextPF { case EventEnvelope(_, "my-3", 1, 3) => }
-        tp.expectNoMessage(NoMsgTime)
-        tp.cancel()
-      }
+        journalOps.withEventsByTag(10.seconds)("prime", NoOffset) { tp =>
+          tp.request(Int.MaxValue)
+          tp.expectNextPF { case EventEnvelope(_, "my-1", 1, 1) => }
+          tp.expectNextPF { case EventEnvelope(_, "my-1", 2, 2) => }
+          tp.expectNextPF { case EventEnvelope(_, "my-1", 3, 3) => }
+          tp.expectNextPF { case EventEnvelope(_, "my-1", 5, 5) => }
+          tp.expectNextPF { case EventEnvelope(_, "my-2", 1, 3) => }
+          tp.expectNextPF { case EventEnvelope(_, "my-3", 1, 3) => }
+          tp.expectNoMessage(NoMsgTime)
+          tp.cancel()
+        }
 
-      journalOps.withEventsByTag(10.seconds)("three", NoOffset) { tp =>
-        tp.request(Int.MaxValue)
-        tp.expectNextPF { case EventEnvelope(_, "my-1", 3, 3) => }
-        tp.expectNextPF { case EventEnvelope(_, "my-2", 1, 3) => }
-        tp.expectNextPF { case EventEnvelope(_, "my-3", 1, 3) => }
-        tp.expectNoMessage(NoMsgTime)
-        tp.cancel()
-      }
+        journalOps.withEventsByTag(10.seconds)("three", NoOffset) { tp =>
+          tp.request(Int.MaxValue)
+          tp.expectNextPF { case EventEnvelope(_, "my-1", 3, 3) => }
+          tp.expectNextPF { case EventEnvelope(_, "my-2", 1, 3) => }
+          tp.expectNextPF { case EventEnvelope(_, "my-3", 1, 3) => }
+          tp.expectNoMessage(NoMsgTime)
+          tp.cancel()
+        }
 
-      journalOps.withEventsByTag(10.seconds)("3", NoOffset) { tp =>
-        tp.request(Int.MaxValue)
-        tp.expectNextPF { case EventEnvelope(_, "my-1", 3, 3) => }
-        tp.expectNextPF { case EventEnvelope(_, "my-2", 1, 3) => }
-        tp.expectNextPF { case EventEnvelope(_, "my-3", 1, 3) => }
-        tp.expectNoMessage(NoMsgTime)
-        tp.cancel()
-      }
+        journalOps.withEventsByTag(10.seconds)("3", NoOffset) { tp =>
+          tp.request(Int.MaxValue)
+          tp.expectNextPF { case EventEnvelope(_, "my-1", 3, 3) => }
+          tp.expectNextPF { case EventEnvelope(_, "my-2", 1, 3) => }
+          tp.expectNextPF { case EventEnvelope(_, "my-3", 1, 3) => }
+          tp.expectNoMessage(NoMsgTime)
+          tp.cancel()
+        }
 
-      journalOps.withEventsByTag(10.seconds)("one", NoOffset) { tp =>
-        tp.request(Int.MaxValue)
-        tp.expectNextPF { case EventEnvelope(_, "my-1", 1, 1) => }
-        tp.expectNoMessage(NoMsgTime)
-        tp.cancel()
-      }
+        journalOps.withEventsByTag(10.seconds)("one", NoOffset) { tp =>
+          tp.request(Int.MaxValue)
+          tp.expectNextPF { case EventEnvelope(_, "my-1", 1, 1) => }
+          tp.expectNoMessage(NoMsgTime)
+          tp.cancel()
+        }
 
-      journalOps.withEventsByTag(10.seconds)("four", NoOffset) { tp =>
-        tp.request(Int.MaxValue)
-        tp.expectNextPF { case EventEnvelope(_, "my-1", 4, 4) => }
-        tp.expectNoMessage(NoMsgTime)
-        tp.cancel()
-      }
+        journalOps.withEventsByTag(10.seconds)("four", NoOffset) { tp =>
+          tp.request(Int.MaxValue)
+          tp.expectNextPF { case EventEnvelope(_, "my-1", 4, 4) => }
+          tp.expectNoMessage(NoMsgTime)
+          tp.cancel()
+        }
 
-      journalOps.withEventsByTag(10.seconds)("five", NoOffset) { tp =>
-        tp.request(Int.MaxValue)
-        tp.expectNextPF { case EventEnvelope(_, "my-1", 5, 5) => }
-        tp.expectNoMessage(NoMsgTime)
-        tp.cancel()
-        tp.expectNoMessage(NoMsgTime)
+        journalOps.withEventsByTag(10.seconds)("five", NoOffset) { tp =>
+          tp.request(Int.MaxValue)
+          tp.expectNextPF { case EventEnvelope(_, "my-1", 5, 5) => }
+          tp.expectNoMessage(NoMsgTime)
+          tp.cancel()
+          tp.expectNoMessage(NoMsgTime)
+        }
       }
     }
-  }
 
   def timeoutMultiplier: Int = 1
 
