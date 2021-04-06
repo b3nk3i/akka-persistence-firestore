@@ -1,28 +1,28 @@
 package org.benkei.akka.persistence.firestore.query
 package scaladsl
 
-import akka.NotUsed
-import akka.actor.ActorSystem
+import akka.actor.{ActorSystem, CoordinatedShutdown}
 import akka.persistence.Persistence
 import akka.persistence.query._
 import akka.persistence.query.scaladsl._
-import akka.serialization.SerializationExtension
 import akka.stream.scaladsl.{Sink, Source, SourceQueueWithComplete}
 import akka.stream.{Materializer, OverflowStrategy, SystemMaterializer}
+import akka.{Done, NotUsed}
 import com.google.cloud.firestore.Firestore
 import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.{FirestoreJournalConfig, FirestoreReadJournalConfig}
+import org.benkei.akka.persistence.firestore.internal.{TimeBasedUUIDSerialization, TimeBasedUUIDs, UUIDTimestamp}
 import org.benkei.akka.persistence.firestore.journal.{FireStoreDao, FirestorePersistentRepr}
+import org.benkei.akka.persistence.firestore.query.scaladsl.FirestoreReadJournal.until
 import org.benkei.akka.persistence.firestore.serialization.FirestoreSerializer
+import org.benkei.akka.persistence.firestore.serialization.extention.FirestorePayloadSerializerExtension
 
+import java.util.UUID
 import scala.collection.immutable.Set
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContextExecutor, Future}
-
-object FirestoreReadJournal {
-  final val Identifier = "firestore-read-journal"
-}
+import scala.math.abs
 
 class FirestoreReadJournal(config: Config, configPath: String)(implicit val system: ActorSystem)
     extends ReadJournal
@@ -39,6 +39,10 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
 
   val db: Firestore = FireStoreExtension(system).client(config)
 
+  CoordinatedShutdown(system).addTask(CoordinatedShutdown.PhaseBeforeServiceUnbind, "closeReadJournalFirestore") { () =>
+    Future(db.close()).map(_ => Done)
+  }
+
   val journalConfig: FirestoreJournalConfig = FirestoreJournalConfig(config)
 
   val readJournalConfig: FirestoreReadJournalConfig = FirestoreReadJournalConfig(config)
@@ -53,7 +57,7 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     Source.tick(readJournalConfig.refreshInterval, 0.seconds, 0).take(1)
 
   val serializer: FirestoreSerializer = {
-    FirestoreSerializer(SerializationExtension(system))
+    FirestoreSerializer(FirestorePayloadSerializerExtension(system).payloadSerializer(config))
   }
 
   val dao = new FireStoreDao(
@@ -76,7 +80,7 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
       val adapter = eventAdapters.get(event.payload.getClass)
       adapter.fromJournal(event.payload, event.manifest).events.map { payload =>
         EventEnvelope(
-          offset = Offset.sequence(ordering),
+          offset = ordering,
           persistenceId = event.persistenceId,
           sequenceNr = event.sequenceNr,
           event = payload,
@@ -104,12 +108,26 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
   }
 
   override def currentEventsByTag(tag: String, offset: Offset): Source[EventEnvelope, NotUsed] = {
+
+    // Upper bound offset is delayed by eventualConsistencyDelay ms
+    val to = until(readJournalConfig)
+
     val events =
       offset match {
-        case NoOffset         => dao.eventsByTag(tag, 0)
-        case Sequence(ordNr)  => dao.eventsByTag(tag, ordNr)
-        case TimeBasedUUID(_) => ???
-        case _                => ???
+        case NoOffset =>
+          dao.eventsByTag(
+            tag,
+            TimeBasedUUIDSerialization.toSortableString(TimeBasedUUIDs.MinUUID),
+            TimeBasedUUIDSerialization.toSortableString(to)
+          )
+        case TimeBasedUUID(uuid) =>
+          dao.eventsByTag(
+            tag,
+            TimeBasedUUIDSerialization.toSortableString(uuid),
+            TimeBasedUUIDSerialization.toSortableString(to)
+          )
+        case _ =>
+          Source.failed(new IllegalArgumentException(s"Unsupported  ${offset} type."))
       }
 
     events
@@ -141,20 +159,22 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     queue:  SourceQueueWithComplete[EventEnvelope],
     tag:    String,
     offset: Offset
-  ): Source[EventEnvelope, NotUsed] = {
+  ): Source[Unit, NotUsed] = {
 
     def retrieveNextBatch(from: Offset) = {
       currentEventsByTag(tag, from)
         .mapAsync(1)(e => queue.offer(e).map(_ => e))
         .runWith(Sink.lastOption)
-        .map(_.map(e => (e.offset, e)))
+        .map(_.map(e => (e.offset, ())))
     }
 
     Source.unfoldAsync(offset) { from =>
       retrieveNextBatch(from)
         .flatMap {
-          case Some((s, e)) => Future.successful(Some((s, e)))
-          case None         => akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(retrieveNextBatch(from))
+          case Some((s, _)) =>
+            Future.successful(Some((s, ())))
+          case None =>
+            akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(Future.successful(Some((from, ()))))
         }
     }
   }
@@ -189,7 +209,9 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
             case Some(ids) =>
               Future.successful(Some(ids))
             case None =>
-              akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(retrieveNextBatch(knownIds))
+              akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(
+                Future.successful(Some((knownIds, ())))
+              )
           }
       }
       .run()
@@ -205,7 +227,7 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
 
     val empty = Source.empty[EventEnvelope]
 
-    if (fromSequenceNr > toSequenceNr) {
+    if (Math.max(1, fromSequenceNr) > toSequenceNr) {
       empty
     } else {
       val (queue, source) =
@@ -239,16 +261,16 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
     persistenceId:  String,
     fromSequenceNr: Long,
     toSequenceNr:   Long
-  ): Source[EventEnvelope, NotUsed] = {
+  ): Source[Unit, NotUsed] = {
 
     def retrieveNextBatch(from: Long) = {
       currentEventsByPersistenceId(persistenceId, from, toSequenceNr)
         .mapAsync(1)(e => queue.offer(e).map(_ => e))
         .runWith(Sink.lastOption)
-        .map(_.map(e => (e.sequenceNr, e)))
+        .map(_.map(e => (e.sequenceNr, None)))
     }
 
-    Source.unfoldAsync(fromSequenceNr) { from =>
+    Source.unfoldAsync[Long, Unit](fromSequenceNr) { from =>
       retrieveNextBatch(from)
         .flatMap {
           case Some((s, _)) if s >= toSequenceNr =>
@@ -256,10 +278,20 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
             queue.complete()
             Future.successful(None)
           case Some((s, e)) =>
-            Future.successful(Some((s + 1, e))) // continue to pull
+            Future.successful(Some((s + 1, ()))) // continue to pull
           case None =>
-            akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(retrieveNextBatch(from))
+            akka.pattern.after(readJournalConfig.refreshInterval, system.scheduler)(Future.successful(Some((from, ()))))
         }
     }
+  }
+}
+
+object FirestoreReadJournal {
+  final val Identifier = "firestore-read-journal"
+
+  def until(readJournalConfig: FirestoreReadJournalConfig): UUID = {
+    val up = System.currentTimeMillis() - abs(readJournalConfig.eventualConsistencyDelay.toMillis)
+
+    TimeBasedUUIDs.create(UUIDTimestamp.fromUnixTimestamp(up), TimeBasedUUIDs.MinLSB)
   }
 }

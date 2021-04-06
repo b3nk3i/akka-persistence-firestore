@@ -5,7 +5,12 @@ import org.benkei.akka.persistence.firestore.config.ConfigOps.ConfigOperations
 
 import scala.concurrent.duration.FiniteDuration
 
-case class FirestoreReadJournalConfig(refreshInterval: FiniteDuration, includeDeleted: Boolean, maxBufferSize: Int)
+case class FirestoreReadJournalConfig(
+  refreshInterval:          FiniteDuration,
+  includeDeleted:           Boolean,
+  maxBufferSize:            Int,
+  eventualConsistencyDelay: FiniteDuration
+)
 
 object FirestoreReadJournalConfig {
 
@@ -13,7 +18,8 @@ object FirestoreReadJournalConfig {
     FirestoreReadJournalConfig(
       config.asFiniteDuration("refresh-interval"),
       config.getBoolean("includeLogicallyDeleted"),
-      config.getInt("max-buffer-size")
+      config.getInt("max-buffer-size"),
+      config.asFiniteDuration("eventual-consistency-delay")
     )
   }
 }

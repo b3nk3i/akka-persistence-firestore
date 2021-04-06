@@ -10,7 +10,7 @@ import akka.stream.testkit.TestSubscriber
 import akka.stream.testkit.javadsl.{TestSink => JavaSink}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.stream.{Materializer, SystemMaterializer}
-import com.typesafe.config.ConfigValue
+import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.SimpleSpec
 import org.benkei.akka.persistence.firestore.query.EventAdapterTest.{Event, TaggedAsyncEvent, TaggedEvent}
 import org.benkei.akka.persistence.firestore.query.javadsl.{FirestoreReadJournal => JavaFirestoreReadJournal}
@@ -20,24 +20,31 @@ import scala.concurrent.Future
 import scala.concurrent.duration.{FiniteDuration, _}
 
 trait ReadJournalOperations {
+
   def withCurrentPersistenceIds(within: FiniteDuration = 60.second)(f: TestSubscriber.Probe[String] => Unit): Unit
-  def withPersistenceIds(within:        FiniteDuration = 60.second)(f: TestSubscriber.Probe[String] => Unit): Unit
+
+  def withPersistenceIds(within: FiniteDuration = 60.second)(f: TestSubscriber.Probe[String] => Unit): Unit
+
   def withCurrentEventsByPersistenceId(
     within:        FiniteDuration = 60.second
   )(persistenceId: String, fromSequenceNr: Long = 0, toSequenceNr: Long = Long.MaxValue)(
     f:             TestSubscriber.Probe[EventEnvelope] => Unit
   ): Unit
+
   def withEventsByPersistenceId(
     within:        FiniteDuration = 60.second
   )(persistenceId: String, fromSequenceNr: Long = 0, toSequenceNr: Long = Long.MaxValue)(
     f:             TestSubscriber.Probe[EventEnvelope] => Unit
   ): Unit
+
   def withCurrentEventsByTag(within: FiniteDuration = 60.second)(tag: String, offset: Offset)(
     f:                               TestSubscriber.Probe[EventEnvelope] => Unit
   ): Unit
+
   def withEventsByTag(within: FiniteDuration = 60.second)(tag: String, offset: Offset)(
     f:                        TestSubscriber.Probe[EventEnvelope] => Unit
-  ):                Unit
+  ): Unit
+
   def countJournal: Future[Long]
 }
 
@@ -112,9 +119,9 @@ class ScalaFirestoreReadJournalOperations(readJournal: FirestoreReadJournal)(imp
       .map(_.sum)
 }
 
-class JavaDslJdbcReadJournalOperations(readJournal: javadsl.FirestoreReadJournal)(implicit
-  system:                                           ActorSystem,
-  mat:                                              Materializer
+class JavaDslFirestoreReadJournalOperations(readJournal: javadsl.FirestoreReadJournal)(implicit
+  system:                                                ActorSystem,
+  mat:                                                   Materializer
 ) extends ReadJournalOperations {
   def this(system: ActorSystem) =
     this(
@@ -224,7 +231,10 @@ object QueryTestSpec {
   }
 }
 
-abstract class QueryTestSpec(config: String, configOverrides: Map[String, ConfigValue] = Map.empty) extends SimpleSpec {
+abstract class QueryTestSpec() extends SimpleSpec {
+
+  def config: Config
+
   case class DeleteCmd(toSequenceNr: Long = Long.MaxValue) extends Serializable
 
   final val ExpectNextTimeout = 10.second

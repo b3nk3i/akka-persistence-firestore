@@ -32,8 +32,6 @@ object FirestoreUtil {
           .foreach { r => r.delete().get() }
       }
 
-    db.collection(journalConfig.rootCollection).document("sequences").create(Map("ordering" -> 0L).asJava).get()
-
     db.close()
   }
 

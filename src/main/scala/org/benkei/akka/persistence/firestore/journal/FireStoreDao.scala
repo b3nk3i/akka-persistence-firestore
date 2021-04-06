@@ -4,10 +4,11 @@ import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import cats.implicits.toFunctorOps
-import com.google.cloud.firestore.{DocumentSnapshot, Firestore}
+import com.google.cloud.firestore.{DocumentSnapshot, FieldValue, Firestore, Query}
 import org.benkei.akka.persistence.firestore.data.Document.Document
 import org.benkei.akka.persistence.firestore.data.Field
-import org.benkei.akka.persistence.firestore.journal.FireStoreDao.{EventJournal, Sequences, asFirestoreRepr}
+import org.benkei.akka.persistence.firestore.internal.{TimeBasedUUIDSerialization, UUIDGenerator}
+import org.benkei.akka.persistence.firestore.journal.FireStoreDao.{EventJournal, asFirestoreRepr}
 import org.benkei.google.ApiFuturesOps.ApiFutureExt
 import org.benkei.google.FirestoreStreamingOps.StreamQueryOps
 
@@ -21,38 +22,29 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
   mat: Materializer
 ) {
 
+  private val uuidGenerator = UUIDGenerator()
+
   def write(events: Seq[FirestorePersistentRepr]): Future[Unit] = {
 
-    val journalSequence = db.collection(rootCollection).document(Sequences)
+    val batch = db.batch()
 
-    // since events are persisted atomically, the batch gets the same timestamp
-    val now = System.currentTimeMillis()
+    events.foreach { event =>
+      val metaData: Document =
+        Map(
+          Field.Ordering.name  -> TimeBasedUUIDSerialization.toSortableString(uuidGenerator.nextUuid()),
+          Field.Timestamp.name -> FieldValue.serverTimestamp()
+        )
 
-    db.runTransaction { transaction =>
-        val currentOrdering =
-          transaction.get(journalSequence).get().getLong(Field.Ordering.name)
+      batch.create(
+        db.collection(rootCollection)
+          .document(event.persistenceId)
+          .collection(EventJournal)
+          .document(event.sequence.toString),
+        (event.data ++ metaData).asJava
+      )
+    }
 
-        val lastOrdering =
-          events.foldLeft(currentOrdering) {
-            case (acc, event) =>
-              val next = acc + 1
-
-              val metaData: Document = Map(Field.Ordering.name -> next, Field.Timestamp.name -> now)
-
-              transaction.create(
-                db.collection(rootCollection)
-                  .document(event.persistenceId)
-                  .collection(EventJournal)
-                  .document(event.sequence.toString),
-                (event.data ++ metaData).asJava
-              )
-              next
-          }
-
-        transaction.update(journalSequence, Field.Ordering.name, lastOrdering)
-      }
-      .futureLift
-      .void
+    batch.commit().futureLift.void
   }
 
   def softDelete(persistenceId: String, toSequenceNr: Long): Future[Unit] = {
@@ -60,7 +52,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
       .document(persistenceId)
       .collection(EventJournal)
       .whereLessThanOrEqualTo(Field.Sequence.name, toSequenceNr)
-      .orderBy(Field.Sequence.name)
+      .orderBy(Field.Sequence.name, Query.Direction.ASCENDING)
       .toStream(queueSize, enqueueTimeout)
       .mapAsyncUnordered(parallelism)(event => event.getReference.update("deleted", true).futureLift)
       .run()
@@ -81,7 +73,7 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
       .document(persistenceId)
       .collection(EventJournal)
       .whereGreaterThanOrEqualTo(Field.Sequence.name, fromSequenceNr)
-      .orderBy(Field.Sequence.name)
+      .orderBy(Field.Sequence.name, Query.Direction.ASCENDING)
       .toStream(queueSize, enqueueTimeout)
       .map(_.getId.toLong)
       .runFold(fromSequenceNr)(math.max)
@@ -91,7 +83,6 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
     Source
       .fromIterator(() => db.collection(rootCollection).listDocuments().iterator().asScala)
       .map(ref => ref.getId)
-      .filterNot(_ == Sequences)
   }
 
   def events(
@@ -104,24 +95,24 @@ class FireStoreDao(db: Firestore, rootCollection: String, queueSize: Int, enqueu
       .collection(EventJournal)
       .whereGreaterThanOrEqualTo(Field.Sequence.name, fromSequenceNr)
       .whereLessThanOrEqualTo(Field.Sequence.name, toSequenceNr)
-      .orderBy(Field.Sequence.name)
+      .orderBy(Field.Sequence.name, Query.Direction.ASCENDING)
       .toStream(queueSize, enqueueTimeout)
       .mapAsync(parallelism)(event => asFirestoreRepr(persistenceId, event))
   }
 
-  def eventsByTag(tag: String, offset: Long): Source[FirestorePersistentRepr, NotUsed] = {
+  def eventsByTag(tag: String, offset: String, to: String): Source[FirestorePersistentRepr, NotUsed] = {
+
     db.collectionGroup(EventJournal)
       .whereGreaterThan(Field.Ordering.name, offset)
+      .whereLessThan(Field.Ordering.name, to)
       .whereArrayContains(Field.Tags.name, tag)
-      .orderBy(Field.Ordering.name)
+      .orderBy(Field.Ordering.name, Query.Direction.ASCENDING)
       .toStream(queueSize, enqueueTimeout)
       .mapAsync(parallelism)(event => asFirestoreRepr(event.getReference.getParent.getParent.getId, event))
   }
 }
 
 object FireStoreDao {
-
-  val Sequences = "sequences"
 
   val EventJournal = "event-journal"
 

@@ -1,8 +1,10 @@
 package org.benkei.akka.persistence.firestore.journal
 
+import akka.Done
+import akka.actor.CoordinatedShutdown
+import akka.event.{Logging, LoggingAdapter}
 import akka.persistence.journal.AsyncWriteJournal
 import akka.persistence.{AtomicWrite, PersistentRepr}
-import akka.serialization.SerializationExtension
 import akka.stream.scaladsl.Source
 import akka.stream.{Materializer, SystemMaterializer}
 import cats.implicits._
@@ -10,8 +12,8 @@ import com.google.cloud.firestore.Firestore
 import com.typesafe.config.Config
 import org.benkei.akka.persistence.firestore.client.FireStoreExtension
 import org.benkei.akka.persistence.firestore.config.FirestoreJournalConfig
-import akka.event.{Logging, LoggingAdapter}
 import org.benkei.akka.persistence.firestore.serialization.FirestoreSerializer
+import org.benkei.akka.persistence.firestore.serialization.extention.FirestorePayloadSerializerExtension
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.Try
@@ -29,8 +31,12 @@ class FirestoreJournalPlugin(config: Config) extends AsyncWriteJournal {
 
   val db: Firestore = FireStoreExtension(context.system).client(config)
 
+  CoordinatedShutdown(context.system).addTask(CoordinatedShutdown.PhaseBeforeServiceUnbind, "closeJournalFirestore") {
+    () => Future(db.close()).map(_ => Done)
+  }
+
   val serializer: FirestoreSerializer = {
-    FirestoreSerializer(SerializationExtension(context.system))
+    FirestoreSerializer(FirestorePayloadSerializerExtension(context.system).payloadSerializer(config))
   }
 
   val journalConfig: FirestoreJournalConfig = FirestoreJournalConfig(config)
@@ -56,7 +62,12 @@ class FirestoreJournalPlugin(config: Config) extends AsyncWriteJournal {
     /*
       persistAll triggers asyncWriteMessages with a Seq of events, it is assumed they have the same persistenceId
      */
-    log.debug("asyncWriteMessages from sequence number [{}] for persistenceId [{}] [{}]", fromSequenceNr, persistenceId, sender())
+    log.debug(
+      "asyncWriteMessages from sequence number [{}] for persistenceId [{}] [{}]",
+      fromSequenceNr,
+      persistenceId,
+      sender()
+    )
 
     Source
       .fromIterator(() => messages.iterator)

@@ -3,7 +3,7 @@ package org.benkei.akka.persistence.firestore
 import akka.actor.{ActorRef, ActorSystem}
 import akka.testkit.TestProbe
 import akka.util.Timeout
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory, ConfigValue}
 import org.benkei.akka.persistence.firestore.util.ClasspathResources
 import org.scalatest._
 import org.scalatest.concurrent.{Eventually, ScalaFutures}
@@ -40,8 +40,18 @@ trait SimpleSpec
     }
   }
 
-  def withActorSystem(config: Config)(f: ActorSystem => Unit): Unit = {
-    implicit val system: ActorSystem = ActorSystem("test", config)
+  def withActorSystem(config: Config, configOverrides: Map[String, ConfigValue] = Map.empty)(
+    f:                        ActorSystem => Unit
+  ): Unit = {
+
+    val overridden =
+      configOverrides.foldLeft(ConfigFactory.load(config)) {
+        case (conf, (path, configValue)) =>
+          conf.withValue(path, configValue)
+      }
+
+    val system: ActorSystem = ActorSystem("test", overridden)
+
     f(system)
     system.terminate().futureValue
   }

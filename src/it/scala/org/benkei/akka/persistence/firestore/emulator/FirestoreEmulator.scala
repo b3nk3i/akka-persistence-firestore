@@ -1,56 +1,67 @@
 package org.benkei.akka.persistence.firestore.emulator
 
-import com.github.dockerjava.core.DefaultDockerClientConfig
-import com.typesafe.config.Config
-import com.whisk.docker.impl.dockerjava.{Docker, DockerJavaExecutorFactory}
-import com.whisk.docker.{DockerContainer, DockerFactory, DockerKit, DockerReadyChecker}
+import com.dimafeng.testcontainers.{FixedHostPortGenericContainer, ForAllTestContainer, GenericContainer}
+import com.typesafe.config.{Config, ConfigValue, ConfigValueFactory}
 import org.scalatest.concurrent.{Eventually, IntegrationPatience, ScalaFutures}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{BeforeAndAfterAll, TestSuite}
 import org.slf4s.Logging
-
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
+import org.testcontainers.containers.wait.strategy.Wait
 
 trait FirestoreEmulator
     extends TestSuite
     with Matchers
     with BeforeAndAfterAll
-    with DockerKit
+    with ForAllTestContainer
     with Logging
     with Eventually
     with IntegrationPatience
     with ScalaFutures {
 
-  sys.props.put("logback.configurationFile", "logback-it.xml")
+  override val container: GenericContainer = FirestoreEmulator.firestoreContainer()
 
-  def config: Config
+  def withEmulator(config: Config): Config = FirestoreEmulator.withEmulator(container, config)
+}
 
-  val emulatorConfig: FirestoreEmulatorConfig = FirestoreEmulatorConfig.load(config)
+object FirestoreEmulator {
 
-  override val StartContainersTimeout: FiniteDuration = 30.seconds
-
-  lazy val emulatorContainer: DockerContainer = DockerContainer(
-    image = s"ridedott/firestore-emulator:${emulatorConfig.imageTag}",
-    name = Some(emulatorConfig.containerName),
-    hostname = Some(emulatorConfig.containerName)
-  ).withPorts(emulatorConfig.internalPort -> Some(emulatorConfig.hostPort))
-    .withReadyChecker(DockerReadyChecker.LogLineContains("Dev App Server is now running."))
-
-  override val dockerContainers = List(emulatorContainer)
-
-  override implicit val dockerFactory: DockerFactory = new DockerJavaExecutorFactory(
-    new Docker(DefaultDockerClientConfig.createDefaultConfigBuilder.build)
-  )
-
-  override def beforeAll(): Unit = {
-    super.beforeAll()
-    log.info("Starting docker containers for integration tests")
-    startAllOrFail()
+  def fixedfirestoreContainer(port: Int): FixedHostPortGenericContainer = {
+    FixedHostPortGenericContainer(
+      imageName = "ridedott/firestore-emulator:1.11.12",
+      exposedHostPort = port,
+      exposedContainerPort = 8080
+    )
   }
 
-  override def afterAll(): Unit = {
-    super.afterAll()
-    log.info("Stopping all containers")
-    stopAllQuietly()
+  def firestoreContainer(): GenericContainer = {
+    GenericContainer(
+      dockerImage = "ridedott/firestore-emulator:1.11.12",
+      exposedPorts = Seq(8080),
+      waitStrategy = Wait.forHttp("/")
+    )
+  }
+
+  def withEmulator(container: GenericContainer, config: Config): Config = {
+    val configOverrides: Map[String, ConfigValue] = Map(
+      FirestoreEmulatorConfig.EmulatorPort -> ConfigValueFactory.fromAnyRef(container.mappedPort(8080)),
+      FirestoreEmulatorConfig.EmulatorHost -> ConfigValueFactory.fromAnyRef(container.containerIpAddress)
+    )
+
+    configOverrides.foldLeft(config) {
+      case (conf, (path, configValue)) =>
+        conf.withValue(path, configValue)
+    }
+  }
+
+  def withFixedEmulator(host: String, port: Int, config: Config): Config = {
+    val configOverrides: Map[String, ConfigValue] = Map(
+      FirestoreEmulatorConfig.EmulatorPort -> ConfigValueFactory.fromAnyRef(port),
+      FirestoreEmulatorConfig.EmulatorHost -> ConfigValueFactory.fromAnyRef(host)
+    )
+
+    configOverrides.foldLeft(config) {
+      case (conf, (path, configValue)) =>
+        conf.withValue(path, configValue)
+    }
   }
 }
