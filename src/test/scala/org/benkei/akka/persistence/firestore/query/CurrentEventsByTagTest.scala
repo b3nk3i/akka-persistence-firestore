@@ -16,8 +16,8 @@ object CurrentEventsByTagTest {
   val refreshInterval: FiniteDuration = 500.milliseconds
 
   val configOverrides: Map[String, ConfigValue] = Map(
-    "firestore-read-journal.max-buffer-size"                 -> ConfigValueFactory.fromAnyRef(maxBufferSize.toString),
-    "firestore-read-journal.refresh-interval"                -> ConfigValueFactory.fromAnyRef(refreshInterval.toString),
+    "firestore-read-journal.max-buffer-size"            -> ConfigValueFactory.fromAnyRef(maxBufferSize.toString),
+    "firestore-read-journal.refresh-interval"           -> ConfigValueFactory.fromAnyRef(refreshInterval.toString),
     "firestore-read-journal.eventual-consistency-delay" -> ConfigValueFactory.fromAnyRef("0s")
   )
 }
