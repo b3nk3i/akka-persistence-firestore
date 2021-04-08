@@ -1,14 +1,18 @@
 import Dependencies._
 
 name := "akka-persistence-firestore "
-organization := "org.benkei"
-licenses += ("Apache-2.0", url("http://www.apache.org/licenses/LICENSE-2.0"))
 
-version := "0.0.1-SNAPSHOT"
+organization := "org.b3nk3i"
+
+licenses += ("Apache-2.0", url("http://www.apache.org/licenses/LICENSE-2.0"))
 
 scalaVersion := "2.13.5"
 
 lazy val root = (project in file("."))
-  .settings(scalafmtOnCompile := true, autoAPIMappings := true, libraryDependencies ++= Libraries.All)
+  .settings(scalafmtOnCompile := true, libraryDependencies ++= Libraries.All)
   .configs(IntegrationTest.extend(Test))
   .settings(Defaults.itSettings)
+
+homepage := Some(url("https://github.com/b3nk3i/akka-persistence-firestore"))
+
+developers := List(Developer("b3nk3i", "Romain Petit", "rom1.petit@gmail.com", url("https://github.com/b3nk3i")))
