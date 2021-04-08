@@ -1,6 +1,6 @@
 import Dependencies._
 
-name := "akka-persistence-firestore "
+name := "akka-persistence-firestore"
 
 organization := "org.b3nk3i"
 
