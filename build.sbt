@@ -20,3 +20,5 @@ developers := List(Developer("b3nk3i", "Romain Petit", "rom1.petit@gmail.com", u
 // since february the server changed from "oss.sonatype.org" to "s01.oss.sonatype.org"
 sonatypeCredentialHost := "s01.oss.sonatype.org"
 sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
+
+publishTo := sonatypePublishToBundle.value
