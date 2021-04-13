@@ -8,7 +8,7 @@ licenses += ("Apache-2.0", url("http://www.apache.org/licenses/LICENSE-2.0"))
 
 scalaVersion := "2.13.5"
 
-publishTo := sonatypePublishToBundle.value
+ThisBuild / publishTo := sonatypePublishToBundle.value
 
 lazy val root = (project in file("."))
   .settings(scalafmtOnCompile := true, libraryDependencies ++= Libraries.All)
