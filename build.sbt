@@ -21,9 +21,9 @@ inThisBuild(
 )
 
 // The server changed from "oss.sonatype.org" to "s01.oss.sonatype.org"
-ThisBuild / sonatypeCredentialHost := "s01.oss.sonatype.org"
-ThisBuild / sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
-ThisBuild / publishTo := sonatypePublishToBundle.value
+sonatypeCredentialHost := "s01.oss.sonatype.org"
+sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
+publishTo := sonatypePublishToBundle.value
 
 lazy val root = (project in file("."))
   .settings(scalafmtOnCompile := true, libraryDependencies ++= Libraries.All)
