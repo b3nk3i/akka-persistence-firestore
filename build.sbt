@@ -25,6 +25,8 @@ sonatypeCredentialHost := "s01.oss.sonatype.org"
 sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
 publishTo := sonatypePublishToBundle.value
 
+sonatypeBundleDirectory := (ThisBuild / baseDirectory).value / "target" / "sonatype-staging"
+
 lazy val root = (project in file("."))
   .settings(scalafmtOnCompile := true, libraryDependencies ++= Libraries.All)
   .configs(IntegrationTest.extend(Test))
