@@ -1,6 +1,7 @@
 # Firestore Plugins for Akka Persistence
 
 [![Scala CI](https://github.com/b3nk3i/akka-persistence-firestore/actions/workflows/scala.yml/badge.svg)](https://github.com/b3nk3i/akka-persistence-firestore/actions/workflows/scala.yml)
+[![Maven Central](https://maven-badges.herokuapp.com/maven-central/org.b3nk3i/akka-persistence-firestore_2.13/badge.svg)](https://maven-badges.herokuapp.com/maven-central/org.b3nk3i/akka-persistence-firestore_2.13)
 
 [Akka Persistence](https://doc.akka.io/docs/akka/current/scala/persistence.html) journal and query
 plugin for [Firestore](https://cloud.google.com/firestore) (google document database).
