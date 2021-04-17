@@ -6,12 +6,8 @@ object Dependencies {
 
     val Cats      = "2.4.2"
     val Firestore = "2.2.5"
-    val UUID      = "4.0.1"
     val Akka      = "2.6.10"
     val ScalaTest = "3.2.3"
-
-    val DockerTestkit = "0.9.9"
-    val DockerJava    = "3.2.7"
 
     val Logback = "1.2.3"
     val Slf4s   = "1.7.26"

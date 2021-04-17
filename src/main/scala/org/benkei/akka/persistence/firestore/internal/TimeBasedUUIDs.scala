@@ -8,7 +8,8 @@ import java.util.{Comparator, UUID}
 import akka.annotation.InternalApi
 
 /**
-  * INTERNAL API
+  * Same as akka-persistence-couchbase TimeBasedUUIDs,
+  *  fall back added if MAC not found as not always accessible in the Cloud
   */
 @InternalApi private[akka] object TimeBasedUUIDs {
   val MinLSB = 0x0000000000000000L

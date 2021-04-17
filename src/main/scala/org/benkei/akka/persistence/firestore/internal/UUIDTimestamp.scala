@@ -6,7 +6,8 @@ import java.time.temporal.TemporalAccessor
 import akka.annotation.InternalApi
 
 /**
-  * INTERNAL API
+  * Same as akka-persistence-couchbase UUIDTimestamp,
+  *  fall back added if MAC not found as not always accessible in the Cloud
   */
 @InternalApi
 private[akka] object UUIDTimestamp {
