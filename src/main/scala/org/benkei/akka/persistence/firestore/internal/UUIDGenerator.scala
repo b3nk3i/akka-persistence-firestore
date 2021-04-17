@@ -1,21 +1,24 @@
 package org.benkei.akka.persistence.firestore.internal
 
+import akka.annotation.InternalApi
+import org.slf4s.Logging
+
 import java.net.NetworkInterface
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
-
-import akka.annotation.InternalApi
-
 import scala.annotation.tailrec
 import scala.util.Random
 
 /**
-  * INTERNAL API
+  * Same as akka-persistence-couchbase UUIDGenerator,
+  *  fall back added if MAC not found as not always accessible in the Cloud
   */
 @InternalApi
-private[akka] object UUIDGenerator {
+private[akka] object UUIDGenerator extends Logging {
+
   def extractMac(): Long = {
-    // use first interface we find
+    // use first MAC address found
+    @tailrec
     def firstAvailableMac(enumeration: java.util.Enumeration[NetworkInterface]): Array[Byte] =
       if (enumeration.hasMoreElements) {
         val mac = enumeration.nextElement().getHardwareAddress
@@ -24,13 +27,15 @@ private[akka] object UUIDGenerator {
       } else {
         Array.emptyByteArray
       }
-    val interfaces = NetworkInterface.getNetworkInterfaces()
-    val mac        = firstAvailableMac(interfaces)
-    if (mac.isEmpty)
-      // spec says to generate pseudo random if there is no mac but we don't need to care about that case
-      // because if we can connect to a db there is an interface
-      throw new RuntimeException("Could not find any network interfaces to base UUIDs on")
-    else
+    val interfaces = NetworkInterface.getNetworkInterfaces
+
+    val mac = firstAvailableMac(interfaces)
+
+    if (mac.isEmpty) {
+      // RFC 4122 does allow the MAC address in a version-1 (or 2) UUID to be replaced by a random 48-bit node ID
+      log.warn("Could not find any network interfaces to base UUIDs on, using a random ID")
+      Random.nextLong()
+    } else
       macAsLong(mac)
   }
 
