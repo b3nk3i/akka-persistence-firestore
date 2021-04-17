@@ -20,7 +20,6 @@ import org.benkei.akka.persistence.firestore.serialization.extention.FirestorePa
 
 import java.util.UUID
 import scala.collection.immutable.Set
-import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.math.abs
 
@@ -52,9 +51,6 @@ class FirestoreReadJournal(config: Config, configPath: String)(implicit val syst
   // If 'config' is empty, or if the plugin reference is not found, then the write plugin will be resolved from the
   // ActorSystem configuration. Otherwise, it will be resolved from the provided 'config'.
   private val eventAdapters = Persistence(system).adaptersFor(writePluginId, config)
-
-  private val delaySource =
-    Source.tick(readJournalConfig.refreshInterval, 0.seconds, 0).take(1)
 
   val serializer: FirestoreSerializer = {
     FirestoreSerializer(FirestorePayloadSerializerExtension(system).payloadSerializer(config))
