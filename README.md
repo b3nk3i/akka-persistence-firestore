@@ -25,7 +25,7 @@ akka.persistence {
 
 firestore-journal {
 
-  class = "org.benkei.akka.persistence.firestore.journal.FirestoreJournalPlugin"
+  class = "org.b3nk3i.akka.persistence.firestore.journal.FirestoreJournalPlugin"
 
   project-id = "<GOOGLE_PROJECT_ID>"
 
