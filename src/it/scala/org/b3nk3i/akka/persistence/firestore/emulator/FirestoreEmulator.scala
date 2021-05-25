@@ -25,20 +25,14 @@ trait FirestoreEmulator
 
 object FirestoreEmulator {
 
+  val ImageName = "ridedott/firestore-emulator:1.11.14"
+
   def fixedfirestoreContainer(port: Int): FixedHostPortGenericContainer = {
-    FixedHostPortGenericContainer(
-      imageName = "ridedott/firestore-emulator:1.11.12",
-      exposedHostPort = port,
-      exposedContainerPort = 8080
-    )
+    FixedHostPortGenericContainer(imageName = ImageName, exposedHostPort = port, exposedContainerPort = 8080)
   }
 
   def firestoreContainer(): GenericContainer = {
-    GenericContainer(
-      dockerImage = "ridedott/firestore-emulator:1.11.12",
-      exposedPorts = Seq(8080),
-      waitStrategy = Wait.forHttp("/")
-    )
+    GenericContainer(dockerImage = ImageName, exposedPorts = Seq(8080), waitStrategy = Wait.forHttp("/"))
   }
 
   def withEmulator(container: GenericContainer, config: Config): Config = {
