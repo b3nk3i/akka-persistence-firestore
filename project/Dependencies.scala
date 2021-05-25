@@ -5,7 +5,7 @@ object Dependencies {
   object Versions {
 
     val Cats      = "2.4.2"
-    val Firestore = "2.2.5"
+    val Firestore = "2.4.0"
     val Akka      = "2.6.10"
     val ScalaTest = "3.2.3"
 
@@ -33,7 +33,7 @@ object Dependencies {
       "com.typesafe.akka" %% "akka-testkit"           % Versions.Akka % Test
     )
 
-    val Docker = List("com.dimafeng" %% "testcontainers-scala-scalatest" % "0.39.3" % Test)
+    val Docker = List("com.dimafeng" %% "testcontainers-scala-scalatest" % "0.39.5" % Test)
 
     val All: List[ModuleID] = List(Cats, Firestore, ScalaTest) ++ Akka ++ Docker ++ Logging
   }

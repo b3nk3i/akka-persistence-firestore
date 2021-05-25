@@ -2,7 +2,7 @@ import Dependencies._
 
 name := "akka-persistence-firestore"
 
-scalaVersion := "2.13.5"
+scalaVersion := "2.13.6"
 
 inThisBuild(
   List(
