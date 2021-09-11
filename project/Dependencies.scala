@@ -4,13 +4,13 @@ object Dependencies {
 
   object Versions {
 
-    val Cats      = "2.4.2"
-    val Firestore = "2.4.0"
-    val Akka      = "2.6.10"
-    val ScalaTest = "3.2.3"
+    val Cats      = "2.6.1"
+    val Firestore = "3.0.3"
+    val Akka      = "2.6.16"
+    val ScalaTest = "3.2.9"
 
-    val Logback = "1.2.3"
-    val Slf4s   = "1.7.26"
+    val Logback = "1.2.5"
+    val Slf4s   = "1.7.30.2"
   }
 
   object Libraries {
