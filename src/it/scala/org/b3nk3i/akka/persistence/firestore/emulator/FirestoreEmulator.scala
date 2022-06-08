@@ -25,7 +25,7 @@ trait FirestoreEmulator
 
 object FirestoreEmulator {
 
-  val ImageName = "ridedott/firestore-emulator:1.11.14"
+  val ImageName = "ridedott/firestore-emulator:1.13.1"
 
   def fixedfirestoreContainer(port: Int): FixedHostPortGenericContainer = {
     FixedHostPortGenericContainer(imageName = ImageName, exposedHostPort = port, exposedContainerPort = 8080)
