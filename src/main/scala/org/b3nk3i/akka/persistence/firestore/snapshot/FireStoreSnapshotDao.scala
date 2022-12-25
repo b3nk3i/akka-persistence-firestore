@@ -5,22 +5,23 @@ import akka.stream.Materializer
 import cats.implicits.{toFunctorOps, toTraverseOps}
 import com.google.cloud.firestore.{Firestore, Query}
 import org.b3nk3i.akka.persistence.firestore.data.Field
-import org.b3nk3i.akka.persistence.firestore.internal.UUIDGenerator
 import org.b3nk3i.akka.persistence.firestore.journal.FireStoreDao.asFirestoreRepr
 import org.b3nk3i.akka.persistence.firestore.journal.FirestorePersistentRepr
 import org.b3nk3i.akka.persistence.firestore.snapshot.FireStoreSnapshotDao.SnapshotStore
 import org.b3nk3i.google.ApiFuturesOps.ApiFutureExt
+import org.b3nk3i.google.FirestoreStreamingOps.StreamQueryOps
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters._
 
-class FireStoreSnapshotDao(db: Firestore, rootCollection: String, enqueueTimeout: Duration)(implicit
-  ec:                          ExecutionContextExecutor,
-  mat:                         Materializer
-) {
-
-  private val uuidGenerator = UUIDGenerator()
+class FireStoreSnapshotDao(
+  db:             Firestore,
+  rootCollection: String,
+  queueSize:      Int,
+  enqueueTimeout: Duration,
+  parallelism:    Int
+)(implicit ec:    ExecutionContextExecutor, mat: Materializer) {
 
   def delete(metadata: SnapshotMetadata): Future[Unit] = {
     db.collection(rootCollection)
@@ -29,6 +30,70 @@ class FireStoreSnapshotDao(db: Firestore, rootCollection: String, enqueueTimeout
       .document(metadata.sequenceNr.toString)
       .delete()
       .futureLift
+      .void
+  }
+
+  def deleteAllSnapshots(persistenceId: String): Future[Unit] = {
+    db.collection(rootCollection)
+      .document(persistenceId)
+      .collection(SnapshotStore)
+      .listDocuments()
+      .asScala
+      .toList
+      .traverse(_.delete().futureLift)
+      .void
+  }
+
+  def deleteUntilMaxTimestamp(persistenceId: String, maxTimestamp: Long): Future[Unit] = {
+    val until = com.google.cloud.Timestamp.of(new java.sql.Timestamp(maxTimestamp))
+
+    db.collection(rootCollection)
+      .document(persistenceId)
+      .collection(SnapshotStore)
+      .whereLessThanOrEqualTo(Field.Timestamp.name, until)
+      .orderBy(Field.Timestamp.name, Query.Direction.DESCENDING)
+      .toStream(queueSize, enqueueTimeout)
+      .mapAsyncUnordered(parallelism)(_.getReference.delete().futureLift)
+      .run()
+      .void
+  }
+
+  def deleteUntilMaxSequenceNr(persistenceId: String, maxSequenceNr: Long): Future[Unit] = {
+    db.collection(rootCollection)
+      .document(persistenceId)
+      .collection(SnapshotStore)
+      .whereLessThanOrEqualTo(Field.Sequence.name, maxSequenceNr)
+      .orderBy(Field.Sequence.name, Query.Direction.DESCENDING)
+      .toStream(queueSize, enqueueTimeout)
+      .mapAsyncUnordered(parallelism)(_.getReference.delete().futureLift)
+      .run()
+      .void
+  }
+
+  def deleteUntilMaxSequenceAndMaxTimestamp(
+    persistenceId: String,
+    maxSequenceNr: Long,
+    maxTimestamp:  Long
+  ): Future[Unit] = {
+
+    val until = com.google.cloud.Timestamp.of(new java.sql.Timestamp(maxTimestamp))
+
+    // Cannot have inequality filters on multiple properties so 2nd criteria handled with find
+    db.collection(rootCollection)
+      .document(persistenceId)
+      .collection(SnapshotStore)
+      .whereLessThanOrEqualTo(Field.Timestamp.name, until)
+      .orderBy(Field.Timestamp.name, Query.Direction.DESCENDING)
+      .toStream(queueSize, enqueueTimeout)
+      .mapAsyncUnordered(parallelism)(asFirestoreRepr(persistenceId, _))
+      .mapAsyncUnordered(parallelism)(
+        s =>
+          Option(s).filter(_.sequence <= maxSequenceNr) match {
+            case Some(doc) => delete(SnapshotMetadata(doc.persistenceId, doc.sequence))
+            case None      => Future.unit
+          }
+      )
+      .run()
       .void
   }
 

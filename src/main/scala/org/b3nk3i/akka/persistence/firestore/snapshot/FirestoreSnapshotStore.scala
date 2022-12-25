@@ -34,7 +34,13 @@ class FirestoreSnapshotStore(config: Config) extends SnapshotStore {
 
   val snapshotConfig = FirestoreSnapshotConfig(config)
 
-  val snapshotDao = new FireStoreSnapshotDao(db, snapshotConfig.rootCollection, snapshotConfig.enqueueTimeout)
+  val snapshotDao = new FireStoreSnapshotDao(
+    db,
+    snapshotConfig.rootCollection,
+    snapshotConfig.queueSize,
+    snapshotConfig.enqueueTimeout,
+    snapshotConfig.parallelism
+  )
 
   override def loadAsync(
     persistenceId: String,
@@ -70,7 +76,18 @@ class FirestoreSnapshotStore(config: Config) extends SnapshotStore {
   }
 
   override def deleteAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Unit] = {
-    ???
+    criteria match {
+      case SnapshotSelectionCriteria(Long.MaxValue, Long.MaxValue, _, _) =>
+        snapshotDao.deleteAllSnapshots(persistenceId)
+      case SnapshotSelectionCriteria(Long.MaxValue, maxTimestamp, _, _) =>
+        snapshotDao.deleteUntilMaxTimestamp(persistenceId, maxTimestamp)
+      case SnapshotSelectionCriteria(maxSequenceNr, Long.MaxValue, _, _) =>
+        snapshotDao.deleteUntilMaxSequenceNr(persistenceId, maxSequenceNr)
+      case SnapshotSelectionCriteria(maxSequenceNr, maxTimestamp, _, _) =>
+        snapshotDao.deleteUntilMaxSequenceAndMaxTimestamp(persistenceId, maxSequenceNr, maxTimestamp)
+      case _ =>
+        Future.successful(())
+    }
   }
 
   private def toSelectedSnapshot(pr: FirestorePersistentRepr): Try[SelectedSnapshot] = {

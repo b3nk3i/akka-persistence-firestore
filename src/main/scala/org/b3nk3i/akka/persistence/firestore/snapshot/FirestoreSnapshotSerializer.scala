@@ -15,6 +15,8 @@ trait FirestoreSnapshotSerializer {
   def deserialize(fpr: FirestorePersistentRepr): Try[Any]
 
   def timestamp(fpr: FirestorePersistentRepr): Try[Long]
+
+  def manifest(fpr: FirestorePersistentRepr): Try[String]
 }
 
 object FirestoreSnapshotSerializer {
@@ -27,7 +29,7 @@ object FirestoreSnapshotSerializer {
     new FirestoreSnapshotSerializer {
 
       def deserialize(fpr: FirestorePersistentRepr): Try[Any] = {
-        serializer.deserialize("", fpr.data)
+        serializer.deserialize(manifest(fpr).getOrElse(""), fpr.data)
       }
 
       def serialize(metadata: SnapshotMetadata, snapshot: Any): Try[FirestorePersistentRepr] = {
@@ -49,6 +51,10 @@ object FirestoreSnapshotSerializer {
 
       override def timestamp(fpr: FirestorePersistentRepr): Try[Long] = {
         fpr.data.read(Field.Timestamp).map(_.toSqlTimestamp.getTime)
+      }
+
+      override def manifest(fpr: FirestorePersistentRepr): Try[String] = {
+        fpr.data.read(Field.Manifest)
       }
     }
 }
